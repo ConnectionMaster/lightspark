@@ -109,6 +109,8 @@ void AVM1Stage::sinit(Class_base* c)
 	c->setDeclaredMethodByQName("displayState","",Class<IFunction>::getFunction(c->getSystemState(),_setDisplayState),SETTER_METHOD,false);
 	c->setDeclaredMethodByQName("scaleMode","",Class<IFunction>::getFunction(c->getSystemState(),_getScaleMode),GETTER_METHOD,false);
 	c->setDeclaredMethodByQName("scaleMode","",Class<IFunction>::getFunction(c->getSystemState(),_setScaleMode),SETTER_METHOD,false);
+	c->setDeclaredMethodByQName("showMenu","",Class<IFunction>::getFunction(c->getSystemState(),_getShowMenu),GETTER_METHOD,false);
+	c->setDeclaredMethodByQName("showMenu","",Class<IFunction>::getFunction(c->getSystemState(),_setShowMenu),SETTER_METHOD,false);
 	c->setDeclaredMethodByQName("align","",Class<IFunction>::getFunction(c->getSystemState(),getAlign),GETTER_METHOD,false);
 	c->setDeclaredMethodByQName("align","",Class<IFunction>::getFunction(c->getSystemState(),setAlign),SETTER_METHOD,false);
 	c->setDeclaredMethodByQName("addListener","",Class<IFunction>::getFunction(c->getSystemState(),addResizeListener),NORMAL_METHOD,false);
@@ -122,6 +124,14 @@ ASFUNCTIONBODY_ATOM(AVM1Stage,_setDisplayState)
 {
 	ARG_UNPACK_ATOM(sys->stage->displayState);
 	sys->stage->onDisplayState(sys->stage->displayState);
+}
+ASFUNCTIONBODY_ATOM(AVM1Stage,_getShowMenu)
+{
+	ret = asAtomHandler::fromBool(sys->stage->showDefaultContextMenu);
+}
+ASFUNCTIONBODY_ATOM(AVM1Stage,_setShowMenu)
+{
+	ARG_UNPACK_ATOM(sys->stage->showDefaultContextMenu);
 }
 ASFUNCTIONBODY_ATOM(AVM1Stage,getAlign)
 {
@@ -505,8 +515,6 @@ ASFUNCTIONBODY_ATOM(AVM1Broadcaster,initialize)
 		listener->setVariableAtomByQName("addListener",nsNameAndKind(),asAtomHandler::fromObjectNoPrimitive(Class<IFunction>::getFunction(sys,addListener)),DYNAMIC_TRAIT);
 		listener->setVariableAtomByQName("removeListener",nsNameAndKind(),asAtomHandler::fromObjectNoPrimitive(Class<IFunction>::getFunction(sys,removeListener)),DYNAMIC_TRAIT);
 		listener->setVariableAtomByQName("_listeners",nsNameAndKind(),asAtomHandler::fromObjectNoPrimitive(listeners),DYNAMIC_TRAIT);
-		LOG(LOG_ERROR,"AVM1Broadcaster.initialize:"<<listener->toDebugString());
-		listener->dumpVariables();
 	}
 }
 ASFUNCTIONBODY_ATOM(AVM1Broadcaster,broadcastMessage)
@@ -514,7 +522,6 @@ ASFUNCTIONBODY_ATOM(AVM1Broadcaster,broadcastMessage)
 	ASObject* th = asAtomHandler::getObject(obj);
 	tiny_string msg;
 	ARG_UNPACK_ATOM(msg);
-	LOG(LOG_ERROR,"AVM1Broadcaster.broadcastMessage:"<<msg);
 	asAtom l = asAtomHandler::invalidAtom;
 	multiname m(nullptr);
 	m.name_type=multiname::NAME_STRING;
@@ -567,8 +574,6 @@ ASFUNCTIONBODY_ATOM(AVM1Broadcaster,addListener)
 	m.name_type=multiname::NAME_STRING;
 	m.name_s_id=sys->getUniqueStringId("_listeners");
 	th->getVariableByMultiname(l,m);
-	LOG(LOG_ERROR,"AVM1Broadcaster.addListener"<<th->toDebugString());
-	th->dumpVariables();
 	if (asAtomHandler::isArray(l))
 	{
 		// TODO spec is not clear if listener can be added multiple times
@@ -590,8 +595,6 @@ ASFUNCTIONBODY_ATOM(AVM1Broadcaster,removeListener)
 	m.name_type=multiname::NAME_STRING;
 	m.name_s_id=sys->getUniqueStringId("_listeners");
 	th->getVariableByMultiname(l,m);
-	LOG(LOG_ERROR,"AVM1Broadcaster.removeListener "<<th->toDebugString());
-	th->dumpVariables();
 	if (asAtomHandler::isArray(l))
 	{
 		Array* listeners = asAtomHandler::as<Array>(l);
@@ -609,6 +612,22 @@ ASFUNCTIONBODY_ATOM(AVM1Broadcaster,removeListener)
 			}
 		}
 	}
+}
+
+void AVM1BitmapData::sinit(Class_base *c)
+{
+	BitmapData::sinit(c);
+	c->setDeclaredMethodByQName("loadBitmap","",Class<IFunction>::getFunction(c->getSystemState(),loadBitmap),NORMAL_METHOD,false);
+}
+ASFUNCTIONBODY_ATOM(AVM1BitmapData,loadBitmap)
+{
+	tiny_string name;
+	ARG_UNPACK_ATOM(name);
+	BitmapTag* tag = dynamic_cast<BitmapTag*>( sys->mainClip->dictionaryLookupByName(sys->getUniqueStringId(name)));
+	if (tag)
+		ret = asAtomHandler::fromObjectNoPrimitive(tag->instance());
+	else
+		LOG(LOG_ERROR,"BitmapData.loadBitmap tag not found:"<<name);
 }
 
 void AVM1Bitmap::sinit(Class_base *c)

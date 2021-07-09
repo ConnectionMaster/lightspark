@@ -148,9 +148,9 @@ void GLRenderContext::setProperties(AS_BLENDMODE blendmode)
 }
 void GLRenderContext::renderTextured(const TextureChunk& chunk, int32_t x, int32_t y, uint32_t w, uint32_t h,
 			float alpha, COLOR_MODE colorMode, float rotate, int32_t xtransformed, int32_t ytransformed, int32_t widthtransformed, int32_t heighttransformed, float xscale, float yscale,
-									 float redMultiplier,float greenMultiplier,float blueMultiplier,float alphaMultiplier,
-									 float redOffset,float greenOffset,float blueOffset,float alphaOffset,
-									 bool isMask, bool hasMask)
+									 float redMultiplier, float greenMultiplier, float blueMultiplier, float alphaMultiplier,
+									 float redOffset, float greenOffset, float blueOffset, float alphaOffset,
+									 bool isMask, bool hasMask, float directMode, RGB directColor, bool smooth)
 {
 	if (isMask)
 	{
@@ -162,6 +162,11 @@ void GLRenderContext::renderTextured(const TextureChunk& chunk, int32_t x, int32
 	else
 	{
 		engineData->exec_glUniform1f(maskUniform, hasMask ? 1 : 0);
+	}
+	if (!smooth)
+	{
+		engineData->exec_glTexParameteri_GL_TEXTURE_2D_GL_TEXTURE_MIN_FILTER_GL_NEAREST();
+		engineData->exec_glTexParameteri_GL_TEXTURE_2D_GL_TEXTURE_MAG_FILTER_GL_NEAREST();
 	}
 	//Set color mode
 	engineData->exec_glUniform1f(yuvUniform, (colorMode==YUV_MODE)?1:0);
@@ -176,6 +181,13 @@ void GLRenderContext::renderTextured(const TextureChunk& chunk, int32_t x, int32
 	engineData->exec_glUniform2f(scaleUniform, xscale,yscale);
 	engineData->exec_glUniform4f(colortransMultiplyUniform, redMultiplier,greenMultiplier,blueMultiplier,alphaMultiplier);
 	engineData->exec_glUniform4f(colortransAddUniform, redOffset/255.0,greenOffset/255.0,blueOffset/255.0,alphaOffset/255.0);
+	// set mode for direct coloring:
+	// 0.0:no coloring
+	// 1.0 coloring for profiling/error message (?)
+	// 2.0:set color for every non transparent pixel (used for text rendering)
+	// 3.0 set color for every pixel (renders a filled rectangle)
+	engineData->exec_glUniform1f(directUniform, directMode);
+	engineData->exec_glUniform4f(directColorUniform,float(directColor.Red)/255.0,float(directColor.Green)/255.0,float(directColor.Blue)/255.0,1.0);
 	//Set matrix
 	setMatrixUniform(LSGL_MODELVIEW);
 
@@ -259,6 +271,11 @@ void GLRenderContext::renderTextured(const TextureChunk& chunk, int32_t x, int32
 	engineData->exec_glDisableVertexAttribArray(TEXCOORD_ATTRIB);
 	if (isMask)
 		engineData->exec_glBindFramebuffer_GL_FRAMEBUFFER(0);
+	if (!smooth)
+	{
+		engineData->exec_glTexParameteri_GL_TEXTURE_2D_GL_TEXTURE_MIN_FILTER_GL_LINEAR();
+		engineData->exec_glTexParameteri_GL_TEXTURE_2D_GL_TEXTURE_MAG_FILTER_GL_LINEAR();
+	}
 }
 
 int GLRenderContext::errorCount = 0;
@@ -300,12 +317,6 @@ CairoRenderContext::CairoRenderContext(uint8_t* buf, uint32_t width, uint32_t he
 
 CairoRenderContext::~CairoRenderContext()
 {
-	for(auto it=customSurfaces.begin();it!=customSurfaces.end();it++)
-	{
-		//Delete and reset here the buffer memory stored in chunks
-		delete[] it->second.tex->chunks;
-		it->second.tex->chunks=nullptr;
-	}
 	cairo_destroy(cr);
 }
 
@@ -352,7 +363,7 @@ void CairoRenderContext::renderTextured(const TextureChunk& chunk, int32_t x, in
 			float alpha, COLOR_MODE colorMode, float rotate, int32_t xtransformed, int32_t ytransformed, int32_t widthtransformed, int32_t heighttransformed, float xscale, float yscale,
 			float redMultiplier, float greenMultiplier, float blueMultiplier, float alphaMultiplier,
 			float redOffset, float greenOffset, float blueOffset, float alphaOffset,
-			bool isMask, bool hasMask)
+			bool isMask, bool hasMask, float directMode, RGB directColor, bool smooth)
 {
 	if (alpha != 1.0)
 		LOG(LOG_NOT_IMPLEMENTED,"CairoRenderContext.renderTextured alpha not implemented:"<<alpha);
@@ -365,6 +376,7 @@ void CairoRenderContext::renderTextured(const TextureChunk& chunk, int32_t x, in
 	cairo_pattern_set_filter(chunkPattern, CAIRO_FILTER_BILINEAR);
 	cairo_pattern_set_extend(chunkPattern, CAIRO_EXTEND_NONE);
 	cairo_save(cr);
+	cairo_set_antialias(cr,smooth ? CAIRO_ANTIALIAS_DEFAULT : CAIRO_ANTIALIAS_NONE);
 	cairo_matrix_t matrix;
 	cairo_matrix_init_translate(&matrix,xtransformed,ytransformed);
 	cairo_matrix_scale(&matrix, xscale, yscale);
@@ -375,6 +387,7 @@ void CairoRenderContext::renderTextured(const TextureChunk& chunk, int32_t x, in
 	cairo_pattern_destroy(chunkPattern);
 	cairo_rectangle(cr, 0, 0, w, h);
 	cairo_fill(cr);
+//	cairo_surface_write_to_png(chunkSurface,"/tmp/cairo.png");
 	cairo_restore(cr);
 }
 
@@ -428,7 +441,7 @@ void CairoRenderContext::setProperties(AS_BLENDMODE blendmode)
 	}
 }
 
-CachedSurface& CairoRenderContext::allocateCustomSurface(const DisplayObject* d, uint8_t* texBuf)
+CachedSurface& CairoRenderContext::allocateCustomSurface(const DisplayObject* d, uint8_t* texBuf, bool isBufferOwner)
 {
 	auto ret=customSurfaces.insert(make_pair(d, CachedSurface()));
 //	assert(ret.second);
@@ -436,5 +449,6 @@ CachedSurface& CairoRenderContext::allocateCustomSurface(const DisplayObject* d,
 	if (surface.tex==nullptr)
 		surface.tex=new TextureChunk();
 	surface.tex->chunks=(uint32_t*)texBuf;
+	surface.isChunkOwner=isBufferOwner;
 	return surface;
 }

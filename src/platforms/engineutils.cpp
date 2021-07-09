@@ -59,8 +59,12 @@ EngineData::EngineData() : contextmenu(nullptr),contextmenurenderer(nullptr),sdl
 EngineData::~EngineData()
 {
 	if (currentPixelBufPtr) {
+#ifdef _WIN32
+		_aligned_free(currentPixelBufPtr);
+#else
 		free(currentPixelBufPtr);
-		currentPixelBufPtr = 0;
+#endif
+		currentPixelBufPtr = nullptr;
 	}
 }
 bool EngineData::mainloop_handleevent(SDL_Event* event,SystemState* sys)
@@ -273,8 +277,14 @@ void EngineData::initGLEW()
 	GLenum err = glewInit();
 	if (GLEW_OK != err)
 	{
-		LOG(LOG_ERROR,_("Cannot initialize GLEW: cause ") << glewGetErrorString(err));
-		throw RunTimeException("Rendering: Cannot initialize GLEW!");
+#ifdef GLEW_ERROR_NO_GLX_DISPLAY
+		char* videodriver = getenv("SDL_VIDEODRIVER"); // ignore GLEW_ERROR_NO_GLX_DISPLAY when running on wayland
+		if (!videodriver || strcmp(videodriver,"wayland")!= 0 || err != GLEW_ERROR_NO_GLX_DISPLAY)
+#endif
+		{
+			LOG(LOG_ERROR,_("Cannot initialize GLEW: cause ") << glewGetErrorString(err));
+			throw RunTimeException("Rendering: Cannot initialize GLEW!");
+		}
 	}
 
 	if(!GLEW_VERSION_2_0)
@@ -693,8 +703,12 @@ void EngineData::resizePixelBuffers(uint32_t w, uint32_t h)
 	pixelBufferWidth=w;
 	pixelBufferHeight=h;
 	if (currentPixelBufPtr) {
+#ifdef _WIN32
+		_aligned_free(currentPixelBufPtr);
+#else
 		free(currentPixelBufPtr);
-		currentPixelBufPtr = 0;
+#endif
+		currentPixelBufPtr = nullptr;
 	}
 }
 
@@ -1312,6 +1326,13 @@ void EngineData::audio_StreamSetVolume(int channel, double volume)
 		Mix_Volume(channel, curvolume);
 }
 
+void EngineData::audio_StreamSetPanning(int channel, uint16_t left, uint16_t right)
+{
+	if (channel != -1)
+		Mix_SetPanning(channel,left/256,right/256);
+	
+}
+
 void EngineData::audio_StreamDeinit(int channel)
 {
 	if (channel != -1)
@@ -1335,7 +1356,11 @@ void EngineData::audio_ManagerCloseMixer()
 
 bool EngineData::audio_ManagerOpenMixer()
 {
-	return Mix_OpenAudio (audio_getSampleRate(), AUDIO_S16, 2, LIGHTSPARK_AUDIO_BUFFERSIZE) >= 0;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	return Mix_OpenAudio (audio_getSampleRate(), AUDIO_S16MSB, 2, LIGHTSPARK_AUDIO_BUFFERSIZE) >= 0;
+#else
+	return Mix_OpenAudio (audio_getSampleRate(), AUDIO_S16LSB, 2, LIGHTSPARK_AUDIO_BUFFERSIZE) >= 0;
+#endif
 }
 
 void EngineData::audio_ManagerDeinit()
@@ -1366,12 +1391,14 @@ externalFontRenderer::externalFontRenderer(const TextData &_textData, EngineData
 										   bool smoothing)
 	: IDrawable(w, h, x, y,rw,rh,rx,ry,r,xs,ys,im,hm, a, m,
 				_redMultiplier,_greenMultiplier,_blueMultiplier,_alphaMultiplier,
-				_redOffset,_greenOffset,_blueOffset,_alphaOffset),m_engine(engine)
+				_redOffset,_greenOffset,_blueOffset,_alphaOffset,smoothing),m_engine(engine)
 {
 	externalressource = engine->setupFontRenderer(_textData,a,smoothing);
 }
 
-uint8_t *externalFontRenderer::getPixelBuffer(float scalex, float scaley)
+uint8_t *externalFontRenderer::getPixelBuffer(float scalex, float scaley, bool *isBufferOwner)
 {
+	if (isBufferOwner)
+		*isBufferOwner = true;
 	return m_engine->getFontPixelBuffer(externalressource,this->width,this->height);
 }

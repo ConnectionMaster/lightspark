@@ -37,7 +37,7 @@
 using namespace std;
 using namespace lightspark;
 
-URLRequest::URLRequest(Class_base* c, const tiny_string u):ASObject(c),method(GET),url(u),contentType("application/x-www-form-urlencoded"),
+URLRequest::URLRequest(Class_base* c, const tiny_string u, const tiny_string m, _NR<ASObject> d):ASObject(c),method(m=="POST" ? POST : GET),url(u),data(d),contentType("application/x-www-form-urlencoded"),
 	requestHeaders(Class<Array>::getInstanceSNoArgs(c->getSystemState()))
 {
 }
@@ -46,15 +46,15 @@ void URLRequest::sinit(Class_base* c)
 {
 	CLASS_SETUP(c, ASObject, _constructor, CLASS_FINAL | CLASS_SEALED);
 	c->setDeclaredMethodByQName("url","",Class<IFunction>::getFunction(c->getSystemState(),_setURL),SETTER_METHOD,true);
-	c->setDeclaredMethodByQName("url","",Class<IFunction>::getFunction(c->getSystemState(),_getURL),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("url","",Class<IFunction>::getFunction(c->getSystemState(),_getURL,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("method","",Class<IFunction>::getFunction(c->getSystemState(),_setMethod),SETTER_METHOD,true);
-	c->setDeclaredMethodByQName("method","",Class<IFunction>::getFunction(c->getSystemState(),_getMethod),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("method","",Class<IFunction>::getFunction(c->getSystemState(),_getMethod,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("data","",Class<IFunction>::getFunction(c->getSystemState(),_setData),SETTER_METHOD,true);
-	c->setDeclaredMethodByQName("data","",Class<IFunction>::getFunction(c->getSystemState(),_getData),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("data","",Class<IFunction>::getFunction(c->getSystemState(),_getData,0,Class<ASObject>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("digest","",Class<IFunction>::getFunction(c->getSystemState(),_setDigest),SETTER_METHOD,true);
-	c->setDeclaredMethodByQName("digest","",Class<IFunction>::getFunction(c->getSystemState(),_getDigest),GETTER_METHOD,true);
-	REGISTER_GETTER_SETTER(c,contentType);
-	REGISTER_GETTER_SETTER(c,requestHeaders);
+	c->setDeclaredMethodByQName("digest","",Class<IFunction>::getFunction(c->getSystemState(),_getDigest,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c,contentType,ASString);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c,requestHeaders,Array);
 }
 
 void URLRequest::buildTraits(ASObject* o)
@@ -434,14 +434,14 @@ void URLLoader::finalize()
 void URLLoader::sinit(Class_base* c)
 {
 	CLASS_SETUP(c, EventDispatcher, _constructor, CLASS_SEALED);
-	c->setDeclaredMethodByQName("dataFormat","",Class<IFunction>::getFunction(c->getSystemState(),_getDataFormat),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("data","",Class<IFunction>::getFunction(c->getSystemState(),_getData),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("dataFormat","",Class<IFunction>::getFunction(c->getSystemState(),_getDataFormat,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("data","",Class<IFunction>::getFunction(c->getSystemState(),_getData,0,Class<ASObject>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("data","",Class<IFunction>::getFunction(c->getSystemState(),_setData),SETTER_METHOD,true);
 	c->setDeclaredMethodByQName("dataFormat","",Class<IFunction>::getFunction(c->getSystemState(),_setDataFormat),SETTER_METHOD,true);
 	c->setDeclaredMethodByQName("load","",Class<IFunction>::getFunction(c->getSystemState(),load),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("close","",Class<IFunction>::getFunction(c->getSystemState(),close),NORMAL_METHOD,true);
-	REGISTER_GETTER_SETTER(c,bytesLoaded);
-	REGISTER_GETTER_SETTER(c,bytesTotal);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c,bytesLoaded,UInteger);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c,bytesTotal,UInteger);
 }
 
 ASFUNCTIONBODY_GETTER_SETTER(URLLoader, bytesLoaded);
@@ -624,7 +624,7 @@ void SharedObject::sinit(Class_base* c)
 	c->setDeclaredMethodByQName("connect","",Class<IFunction>::getFunction(c->getSystemState(),connect),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("setProperty","",Class<IFunction>::getFunction(c->getSystemState(),setProperty),NORMAL_METHOD,true);
 	REGISTER_GETTER_SETTER(c,client);
-	REGISTER_GETTER(c,data);
+	REGISTER_GETTER_RESULTTYPE(c,data,ASObject);
 	c->setDeclaredMethodByQName("defaultObjectEncoding","",Class<IFunction>::getFunction(c->getSystemState(),_getDefaultObjectEncoding),GETTER_METHOD,false);
 	c->setDeclaredMethodByQName("defaultObjectEncoding","",Class<IFunction>::getFunction(c->getSystemState(),_setDefaultObjectEncoding),SETTER_METHOD,false);
 	REGISTER_SETTER(c,fps);
@@ -2006,7 +2006,7 @@ void NetStream::execute()
 				audioDecoder=streamDecoder->audioDecoder;
 			
 			if(audioStream==NULL && audioDecoder && audioDecoder->isValid())
-				audioStream=getSys()->audioManager->createStream(audioDecoder,streamDecoder->hasVideo(),nullptr,0);
+				audioStream=getSys()->audioManager->createStream(audioDecoder,streamDecoder->hasVideo(),nullptr,0,soundTransform ? soundTransform->volume : 1.0);
 			if(!tickStarted && isReady() && frameRate && ((framesdecoded / frameRate) >= this->bufferTime))
 			{
 				tickStarted=true;
@@ -2360,15 +2360,19 @@ ASFUNCTIONBODY_ATOM(URLVariables,_constructor)
 
 tiny_string URLVariables::toString_priv()
 {
-	int size=numVariables();
 	tiny_string tmp;
-	for(int i=0;i<size;i++)
+	uint32_t index=0;
+	while ((index = nextNameIndex(index))!= 0)
 	{
-		const tiny_string& name=getSystemState()->getStringFromUniqueId(getNameAt(i));
+		if (!tmp.empty())
+			tmp+="&";
+		asAtom nameAtom = asAtomHandler::invalidAtom;
+		nextName(nameAtom,index);
+		const tiny_string& name=asAtomHandler::toString(nameAtom,getSystemState());
 		//TODO: check if the allow_unicode flag should be true or false in g_uri_escape_string
 
 		asAtom val=asAtomHandler::invalidAtom;
-		getValueAt(val,i);
+		nextValue(val,index);
 		if(asAtomHandler::isArray(val))
 		{
 			//Print using multiple properties
@@ -2407,8 +2411,6 @@ tiny_string URLVariables::toString_priv()
 			tmp+=escapedValue;
 			g_free(escapedValue);
 		}
-		if(i!=size-1)
-			tmp+="&";
 	}
 	return tmp;
 }

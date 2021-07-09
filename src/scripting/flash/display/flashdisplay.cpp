@@ -84,25 +84,25 @@ void LoaderInfo::sinit(Class_base* c)
 {
 	CLASS_SETUP(c, EventDispatcher, _constructor, CLASS_SEALED);
 	c->isReusable = true;
-	c->setDeclaredMethodByQName("loaderURL","",Class<IFunction>::getFunction(c->getSystemState(),_getLoaderURL),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("loader","",Class<IFunction>::getFunction(c->getSystemState(),_getLoader),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("content","",Class<IFunction>::getFunction(c->getSystemState(),_getContent),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("url","",Class<IFunction>::getFunction(c->getSystemState(),_getURL),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("bytesLoaded","",Class<IFunction>::getFunction(c->getSystemState(),_getBytesLoaded),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("bytesTotal","",Class<IFunction>::getFunction(c->getSystemState(),_getBytesTotal),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("bytes","",Class<IFunction>::getFunction(c->getSystemState(),_getBytes),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("applicationDomain","",Class<IFunction>::getFunction(c->getSystemState(),_getApplicationDomain),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("sharedEvents","",Class<IFunction>::getFunction(c->getSystemState(),_getSharedEvents),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("width","",Class<IFunction>::getFunction(c->getSystemState(),_getWidth),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("height","",Class<IFunction>::getFunction(c->getSystemState(),_getHeight),GETTER_METHOD,true);
-	REGISTER_GETTER(c,parameters);
-	REGISTER_GETTER(c,actionScriptVersion);
-	REGISTER_GETTER(c,swfVersion);
-	REGISTER_GETTER(c,childAllowsParent);
-	REGISTER_GETTER(c,contentType);
-	REGISTER_GETTER(c,uncaughtErrorEvents);
-	REGISTER_GETTER(c,parentAllowsChild);
-	REGISTER_GETTER(c,frameRate);
+	c->setDeclaredMethodByQName("loaderURL","",Class<IFunction>::getFunction(c->getSystemState(),_getLoaderURL,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("loader","",Class<IFunction>::getFunction(c->getSystemState(),_getLoader,0,Class<Loader>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("content","",Class<IFunction>::getFunction(c->getSystemState(),_getContent,0,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("url","",Class<IFunction>::getFunction(c->getSystemState(),_getURL,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("bytesLoaded","",Class<IFunction>::getFunction(c->getSystemState(),_getBytesLoaded,0,Class<UInteger>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("bytesTotal","",Class<IFunction>::getFunction(c->getSystemState(),_getBytesTotal,0,Class<UInteger>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("bytes","",Class<IFunction>::getFunction(c->getSystemState(),_getBytes,0,Class<ByteArray>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("applicationDomain","",Class<IFunction>::getFunction(c->getSystemState(),_getApplicationDomain,0,Class<ApplicationDomain>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("sharedEvents","",Class<IFunction>::getFunction(c->getSystemState(),_getSharedEvents,0,Class<EventDispatcher>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("width","",Class<IFunction>::getFunction(c->getSystemState(),_getWidth,0,Class<Integer>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("height","",Class<IFunction>::getFunction(c->getSystemState(),_getHeight,0,Class<Integer>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	REGISTER_GETTER_RESULTTYPE(c,parameters,ASObject);
+	REGISTER_GETTER_RESULTTYPE(c,actionScriptVersion,UInteger);
+	REGISTER_GETTER_RESULTTYPE(c,swfVersion,UInteger);
+	REGISTER_GETTER_RESULTTYPE(c,childAllowsParent,Boolean);
+	REGISTER_GETTER_RESULTTYPE(c,contentType,ASString);
+	REGISTER_GETTER_RESULTTYPE(c,uncaughtErrorEvents,UncaughtErrorEvents);
+	REGISTER_GETTER_RESULTTYPE(c,parentAllowsChild,Boolean);
+	REGISTER_GETTER_RESULTTYPE(c,frameRate,Number);
 }
 
 ASFUNCTIONBODY_GETTER(LoaderInfo,parameters);
@@ -183,7 +183,6 @@ void LoaderInfo::setBytesLoaded(uint32_t b)
 			{
 				this->incRef();
 				progressEvent = _MR(Class<ProgressEvent>::getInstanceS(getSystemState(),bytesLoaded,bytesTotal));
-				progressEvent->incRef();
 				getVm(getSystemState())->addIdleEvent(_MR(this),progressEvent);
 			}
 			else
@@ -463,6 +462,13 @@ void LoaderThread::execute()
 		loaderInfo->setBytesLoaded(bytes->getLength());
 
 		sbuf = new bytes_buf(bytes->bytes,bytes->getLength());
+
+// extract embedded swf to separate file
+//		char* name_used=nullptr;
+//		int fd = g_file_open_tmp("lightsparkXXXXXX.swf",&name_used,nullptr);
+//		write(fd,bytes->bytes,bytes->getLength());
+//		close(fd);
+//		g_free(name_used);
 	}
 
 	istream s(sbuf);
@@ -596,7 +602,7 @@ void Loader::loadIntern(URLRequest* r, LoaderContext* context)
 	else
 	{
 		//Different domain
-		_NR<ApplicationDomain> parentDomain =  this->getSystemState()->systemDomain;
+		_NR<ApplicationDomain> parentDomain = _MR(this->getSystemState()->systemDomain);
 		this->contentLoaderInfo->applicationDomain = _MR(Class<ApplicationDomain>::getInstanceS(this->getSystemState(),parentDomain));
 		this->contentLoaderInfo->securityDomain = _MR(Class<SecurityDomain>::getInstanceS(this->getSystemState()));
 	}
@@ -738,14 +744,14 @@ Loader::~Loader()
 void Loader::sinit(Class_base* c)
 {
 	CLASS_SETUP(c, DisplayObjectContainer, _constructor, CLASS_SEALED);
-	c->setDeclaredMethodByQName("contentLoaderInfo","",Class<IFunction>::getFunction(c->getSystemState(),_getContentLoaderInfo),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("content","",Class<IFunction>::getFunction(c->getSystemState(),_getContent),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("contentLoaderInfo","",Class<IFunction>::getFunction(c->getSystemState(),_getContentLoaderInfo,0,Class<LoaderInfo>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("content","",Class<IFunction>::getFunction(c->getSystemState(),_getContent,0,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("close","",Class<IFunction>::getFunction(c->getSystemState(),close),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("loadBytes","",Class<IFunction>::getFunction(c->getSystemState(),loadBytes),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("load","",Class<IFunction>::getFunction(c->getSystemState(),load),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("unload","",Class<IFunction>::getFunction(c->getSystemState(),_unload),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("unloadAndStop","",Class<IFunction>::getFunction(c->getSystemState(),_unloadAndStop),NORMAL_METHOD,true);
-	REGISTER_GETTER(c,uncaughtErrorEvents);
+	REGISTER_GETTER_RESULTTYPE(c,uncaughtErrorEvents,UncaughtErrorEvents);
 }
 
 ASFUNCTIONBODY_GETTER(Loader,uncaughtErrorEvents);
@@ -799,7 +805,7 @@ void Loader::setContent(_R<DisplayObject> o)
 		o->loaderInfo->setComplete();
 }
 
-Sprite::Sprite(Class_base* c):DisplayObjectContainer(c),TokenContainer(this, this->getSystemState()->spriteTokenMemory),graphics(NullRef),streamingsound(false),dragged(false),buttonMode(false),useHandCursor(false)
+Sprite::Sprite(Class_base* c):DisplayObjectContainer(c),TokenContainer(this),graphics(NullRef),soundstartframe(UINT32_MAX),streamingsound(false),dragged(false),buttonMode(false),useHandCursor(false)
 {
 	subtype=SUBTYPE_SPRITE;
 }
@@ -818,17 +824,39 @@ bool Sprite::destruct()
 	return DisplayObjectContainer::destruct();
 }
 
+void Sprite::finalize()
+{
+	resetToStart();
+	graphics.reset();
+	hitArea.reset();
+	hitTarget.reset();
+	tokens.clear();
+	DisplayObjectContainer::finalize();
+}
+
+void Sprite::startDrawJob()
+{
+	if (graphics)
+		graphics->startDrawJob();
+}
+
+void Sprite::endDrawJob()
+{
+	if (graphics)
+		graphics->endDrawJob();
+}
+
 void Sprite::sinit(Class_base* c)
 {
 	CLASS_SETUP(c, DisplayObjectContainer, _constructor, CLASS_SEALED);
 	c->isReusable = true;
-	c->setDeclaredMethodByQName("graphics","",Class<IFunction>::getFunction(c->getSystemState(),_getGraphics),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("graphics","",Class<IFunction>::getFunction(c->getSystemState(),_getGraphics,0,Class<Graphics>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("startDrag","",Class<IFunction>::getFunction(c->getSystemState(),_startDrag),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("stopDrag","",Class<IFunction>::getFunction(c->getSystemState(),_stopDrag),NORMAL_METHOD,true);
-	REGISTER_GETTER_SETTER(c, buttonMode);
-	REGISTER_GETTER_SETTER(c, hitArea);
-	REGISTER_GETTER_SETTER(c, useHandCursor);
-	c->setDeclaredMethodByQName("soundTransform","",Class<IFunction>::getFunction(c->getSystemState(),getSoundTransform),GETTER_METHOD,true);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c, buttonMode,Boolean);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c, hitArea,Sprite);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c, useHandCursor,Boolean);
+	c->setDeclaredMethodByQName("soundTransform","",Class<IFunction>::getFunction(c->getSystemState(),getSoundTransform,0,Class<SoundTransform>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("soundTransform","",Class<IFunction>::getFunction(c->getSystemState(),setSoundTransform),SETTER_METHOD,true);
 }
 
@@ -1016,7 +1044,7 @@ bool DisplayObjectContainer::LegacyChildRemoveDeletionMark(int32_t depth)
 DisplayObject *DisplayObjectContainer::findRemovedLegacyChild(uint32_t name)
 {
 	auto it = namedRemovedLegacyChildren.find(name);
-	return (it == namedRemovedLegacyChildren.end() ? nullptr : (*it).second);
+	return (it == namedRemovedLegacyChildren.end() ? nullptr : (*it).second.getPtr());
 }
 
 void DisplayObjectContainer::eraseRemovedLegacyChild(uint32_t name)
@@ -1073,11 +1101,19 @@ _NR<DisplayObject> DisplayObjectContainer::hitTestImpl(_NR<DisplayObject> last, 
 				ret = _MNR(this);
 				return ret;
 			}
+			if (interactiveObjectsOnly && !(*j)->is<InteractiveObject>())
+			{
+				// we have hit a non-interactive object, so "this" may be the hit target
+				// but we continue to search the children as there may be an InteractiveObject that is also hit
+				this->incRef();
+				ret = _MNR(this);
+				continue;
+			}
 			break;
 		}
 	}
 	// only check interactive objects
-	if(ret && interactiveObjectsOnly && !ret->is<InteractiveObject>())
+	if(ret && interactiveObjectsOnly && !ret->is<InteractiveObject>() && mouseChildren)
 		ret.reset();
 	
 	/* When mouseChildren is false, we should get all events of our children */
@@ -1145,15 +1181,17 @@ void Sprite::setSound(SoundChannel *s,bool forstreaming)
 	streamingsound = forstreaming;
 }
 
-void Sprite::appendSound(unsigned char *buf, int len)
+void Sprite::appendSound(unsigned char *buf, int len, uint32_t frame)
 {
 	if (sound)
 		sound->appendStreamBlock(buf,len);
+	if (soundstartframe == UINT32_MAX)
+		soundstartframe=frame;
 }
 
-void Sprite::checkSound()
+void Sprite::checkSound(uint32_t frame)
 {
-	if (sound && !sound->isPlaying() && streamingsound)
+	if (sound && streamingsound && soundstartframe==frame)
 		sound->play();
 }
 
@@ -1260,9 +1298,9 @@ Scene::Scene(Class_base* c, const Scene_data& data, uint32_t _numFrames):ASObjec
 void Scene::sinit(Class_base* c)
 {
 	CLASS_SETUP_NO_CONSTRUCTOR(c, ASObject, CLASS_SEALED | CLASS_FINAL);
-	c->setDeclaredMethodByQName("labels","",Class<IFunction>::getFunction(c->getSystemState(),_getLabels),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("name","",Class<IFunction>::getFunction(c->getSystemState(),_getName),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("numFrames","",Class<IFunction>::getFunction(c->getSystemState(),_getNumFrames),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("labels","",Class<IFunction>::getFunction(c->getSystemState(),_getLabels,0,Class<Array>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("name","",Class<IFunction>::getFunction(c->getSystemState(),_getName,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("numFrames","",Class<IFunction>::getFunction(c->getSystemState(),_getNumFrames,0,Class<Integer>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 }
 
 ASFUNCTIONBODY_ATOM(Scene,_getLabels)
@@ -1358,14 +1396,14 @@ void MovieClip::sinit(Class_base* c)
 {
 	CLASS_SETUP(c, Sprite, _constructor, CLASS_DYNAMIC_NOT_FINAL);
 	c->isReusable = true;
-	c->setDeclaredMethodByQName("currentFrame","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentFrame),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("totalFrames","",Class<IFunction>::getFunction(c->getSystemState(),_getTotalFrames),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("framesLoaded","",Class<IFunction>::getFunction(c->getSystemState(),_getFramesLoaded),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("currentFrameLabel","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentFrameLabel),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("currentLabel","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentLabel),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("currentLabels","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentLabels),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("scenes","",Class<IFunction>::getFunction(c->getSystemState(),_getScenes),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("currentScene","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentScene),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("currentFrame","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentFrame,0,Class<Integer>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("totalFrames","",Class<IFunction>::getFunction(c->getSystemState(),_getTotalFrames,0,Class<Integer>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("framesLoaded","",Class<IFunction>::getFunction(c->getSystemState(),_getFramesLoaded,0,Class<Integer>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("currentFrameLabel","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentFrameLabel,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("currentLabel","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentLabel,0,Class<ASString>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("currentLabels","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentLabels,0,Class<Array>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("scenes","",Class<IFunction>::getFunction(c->getSystemState(),_getScenes,0,Class<Array>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("currentScene","",Class<IFunction>::getFunction(c->getSystemState(),_getCurrentScene,0,Class<Scene>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
 	c->setDeclaredMethodByQName("stop","",Class<IFunction>::getFunction(c->getSystemState(),stop),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("play","",Class<IFunction>::getFunction(c->getSystemState(),play),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("gotoAndStop","",Class<IFunction>::getFunction(c->getSystemState(),gotoAndStop),NORMAL_METHOD,true);
@@ -1373,7 +1411,7 @@ void MovieClip::sinit(Class_base* c)
 	c->setDeclaredMethodByQName("prevFrame","",Class<IFunction>::getFunction(c->getSystemState(),prevFrame),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("nextFrame","",Class<IFunction>::getFunction(c->getSystemState(),nextFrame),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("addFrameScript","",Class<IFunction>::getFunction(c->getSystemState(),addFrameScript),NORMAL_METHOD,true);
-	REGISTER_GETTER_SETTER(c, enabled);
+	REGISTER_GETTER_SETTER_RESULTTYPE(c, enabled,Boolean);
 }
 
 ASFUNCTIONBODY_GETTER_SETTER(MovieClip, enabled);
@@ -1413,7 +1451,6 @@ bool MovieClip::destruct()
 	totalFrames_unreliable = 1;
 	inExecuteFramescript=false;
 
-	frames.clear();
 	scenes.clear();
 	setFramesLoaded(0);
 	frames.emplace_back(Frame());
@@ -1423,6 +1460,21 @@ bool MovieClip::destruct()
 
 	enabled = true;
 	return Sprite::destruct();
+}
+
+void MovieClip::finalize()
+{
+	frames.clear();
+	auto it = frameScripts.begin();
+	while (it != frameScripts.end())
+	{
+		ASATOM_DECREF(it->second);
+		it++;
+	}
+	frameScripts.clear();
+	scenes.clear();
+	state.reset();
+	Sprite::finalize();
 }
 
 /* Returns a Scene_data pointer for a scene called sceneName, or for
@@ -1530,7 +1582,6 @@ ASFUNCTIONBODY_ATOM(MovieClip,stop)
 	if (!th->state.stop_FP)
 	{
 		th->state.stop_FP=true;
-		th->state.avm1ScriptExecutedAfterStop=false;
 	}
 	th->state.next_FP=th->state.FP;
 }
@@ -1539,7 +1590,7 @@ ASFUNCTIONBODY_ATOM(MovieClip,play)
 {
 	MovieClip* th=asAtomHandler::as<MovieClip>(obj);
 	th->state.stop_FP=false;
-	th->state.avm1ScriptExecutedAfterStop=false;
+	th->advanceFrame();
 }
 
 void MovieClip::gotoAnd(asAtom* args, const unsigned int argslen, bool stop)
@@ -1588,7 +1639,6 @@ void MovieClip::gotoAnd(asAtom* args, const unsigned int argslen, bool stop)
 	state.next_FP = next_FP;
 	state.explicit_FP = true;
 	state.stop_FP = stop;
-	state.avm1ScriptExecutedAfterStop=false;
 	if (inExecuteFramescript)
 		return; // we are currently executing a framescript, so advancing to the new frame will be done through the normal SystemState tick;
 
@@ -1603,7 +1653,7 @@ void MovieClip::gotoAnd(asAtom* args, const unsigned int argslen, bool stop)
 		advanceFrame();
 }
 
-void MovieClip::AVM1gotoFrameLabel(const tiny_string& label)
+void MovieClip::AVM1gotoFrameLabel(const tiny_string& label,bool stop, bool switchplaystate)
 {
 	uint32_t dest=getFrameIdByLabel(label, "");
 	if(dest==FRAME_NOT_FOUND)
@@ -1611,7 +1661,7 @@ void MovieClip::AVM1gotoFrameLabel(const tiny_string& label)
 		LOG(LOG_ERROR, "gotoFrameLabel: label not found:" <<label);
 		return;
 	}
-	AVM1gotoFrame(dest, true, true);
+	AVM1gotoFrame(dest, stop, switchplaystate);
 }
 void MovieClip::AVM1gotoFrame(int frame, bool stop, bool switchplaystate)
 {
@@ -1619,7 +1669,8 @@ void MovieClip::AVM1gotoFrame(int frame, bool stop, bool switchplaystate)
 		frame = 0;
 	state.next_FP = frame;
 	state.explicit_FP = true;
-	bool advance = true;
+	// no need to advance if we stop at current frame
+	bool advance = !stop || state.next_FP != state.FP;
 	if (switchplaystate)
 	{
 		if (!stop && state.stop_FP)
@@ -1628,9 +1679,8 @@ void MovieClip::AVM1gotoFrame(int frame, bool stop, bool switchplaystate)
 			advance = false;
 		}
 		state.stop_FP = stop;
-		state.avm1ScriptExecutedAfterStop=false;
 	}
-	if (advance) 
+	if (advance)
 		advanceFrame();
 }
 
@@ -1650,8 +1700,9 @@ ASFUNCTIONBODY_ATOM(MovieClip,nextFrame)
 {
 	MovieClip* th=asAtomHandler::as<MovieClip>(obj);
 	assert_and_throw(th->state.FP<th->getFramesLoaded());
-	th->state.next_FP = th->state.FP+1;
+	th->state.next_FP = th->state.FP == th->getFramesLoaded()-1 ? th->state.FP : th->state.FP+1;
 	th->state.explicit_FP=true;
+	th->state.stop_FP=true;
 	if (th->inExecuteFramescript)
 		return; // we are currently executing a framescript, so advancing to the new frame will be done through the normal SystemState tick;
 	if (!th->isOnStage())
@@ -1670,8 +1721,9 @@ ASFUNCTIONBODY_ATOM(MovieClip,prevFrame)
 {
 	MovieClip* th=asAtomHandler::as<MovieClip>(obj);
 	assert_and_throw(th->state.FP<th->getFramesLoaded());
-	th->state.next_FP = th->state.FP-1;
+	th->state.next_FP = th->state.FP == 0 ? th->state.FP : th->state.FP-1;
 	th->state.explicit_FP=true;
+	th->state.stop_FP=true;
 	if (th->inExecuteFramescript)
 		return; // we are currently executing a framescript, so advancing to the new frame will be done through the normal SystemState tick;
 	if (!th->isOnStage())
@@ -1868,21 +1920,27 @@ bool MovieClip::AVM1HandleMouseEvent(EventDispatcher *dispatcher, MouseEvent *e)
 		this->globalToLocal(xg,yg,x,y);
 		this->incRef();
 		_NR<DisplayObject> dispobj=hitTest(_MR(this),x,y, DisplayObject::MOUSE_CLICK,true);
-		if (!dispobj && ((e->type == "click")|| (e->type == "releaseOutside")))
-			return false;
-		if (dispobj && this->actions)
+		if (this->actions)
 		{
 			for (auto it = actions->ClipActionRecords.begin(); it != actions->ClipActionRecords.end(); it++)
 			{
+				// according to https://docstore.mik.ua/orelly/web2/action/ch10_09.htm
+				// mouseUp/mouseDown/mouseMove events are sent to all MovieClips on the Stage
 				if( (e->type == "mouseDown" && it->EventFlags.ClipEventMouseDown)
 					|| (e->type == "mouseUp" && it->EventFlags.ClipEventMouseUp)
-					|| (e->type == "click" && it->EventFlags.ClipEventRelease)
-					|| (e->type == "mouseDown" && it->EventFlags.ClipEventPress)
 					|| (e->type == "mouseMove" && it->EventFlags.ClipEventMouseMove)
+					)
+				{
+					std::map<uint32_t,asAtom> m;
+					ACTIONRECORD::executeActions(this,this->getCurrentFrame()->getAVM1Context(),it->actions,it->startactionpos,m);
+				}
+				if( dispobj &&
+					((e->type == "mouseUp" && it->EventFlags.ClipEventRelease)
+					|| (e->type == "mouseDown" && it->EventFlags.ClipEventPress)
 					|| (e->type == "rollOver" && it->EventFlags.ClipEventRollOver)
 					|| (e->type == "rollOut" && it->EventFlags.ClipEventRollOut)
 					|| (e->type == "releaseOutside" && it->EventFlags.ClipEventReleaseOutside)
-					)
+					))
 				{
 					std::map<uint32_t,asAtom> m;
 					ACTIONRECORD::executeActions(this,this->getCurrentFrame()->getAVM1Context(),it->actions,it->startactionpos,m);
@@ -1997,6 +2055,7 @@ void MovieClip::AVM1SetupMethods(Class_base* c)
 	c->setDeclaredMethodByQName("unloadMovie","",Class<IFunction>::getFunction(c->getSystemState(),AVM1UnloadMovie),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("createEmptyMovieClip","",Class<IFunction>::getFunction(c->getSystemState(),AVM1CreateEmptyMovieClip),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("removeMovieClip","",Class<IFunction>::getFunction(c->getSystemState(),AVM1RemoveMovieClip),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("duplicateMovieClip","",Class<IFunction>::getFunction(c->getSystemState(),AVM1DuplicateMovieClip),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("clear","",Class<IFunction>::getFunction(c->getSystemState(),AVM1Clear),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("moveTo","",Class<IFunction>::getFunction(c->getSystemState(),AVM1MoveTo),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("lineTo","",Class<IFunction>::getFunction(c->getSystemState(),AVM1LineTo),NORMAL_METHOD,true);
@@ -2128,7 +2187,7 @@ ASFUNCTIONBODY_ATOM(MovieClip,AVM1CreateEmptyMovieClip)
 ASFUNCTIONBODY_ATOM(MovieClip,AVM1RemoveMovieClip)
 {
 	MovieClip* th=asAtomHandler::as<MovieClip>(obj);
-	if (th->getParent() && !th->legacy)
+	if (th->getParent() && !th->legacy && !th->is<RootMovieClip>())
 	{
 		if (th->name != BUILTIN_STRINGS::EMPTY)
 		{
@@ -2141,6 +2200,46 @@ ASFUNCTIONBODY_ATOM(MovieClip,AVM1RemoveMovieClip)
 		}
 		th->getParent()->_removeChild(th);
 	}
+}
+ASFUNCTIONBODY_ATOM(MovieClip,AVM1DuplicateMovieClip)
+{
+	MovieClip* th=asAtomHandler::as<MovieClip>(obj);
+	if (argslen < 2)
+		throw RunTimeException("AVM1: invalid number of arguments for DuplicateMovieClip");
+	if (!th->getParent())
+	{
+		LOG(LOG_ERROR,"calling DuplicateMovieClip on clip without parent");
+		ret = asAtomHandler::undefinedAtom;
+		return;
+	}
+	int Depth = asAtomHandler::toInt(args[1]);
+	uint32_t nameId = asAtomHandler::toStringId(args[0],sys);
+	AVM1MovieClip* toAdd=nullptr;
+	DefineSpriteTag* tag = (DefineSpriteTag*)th->loadedFrom->dictionaryLookup(th->getTagID());
+	if (tag)
+		toAdd=Class<AVM1MovieClip>::getInstanceS(sys,*tag,th->getTagID(),nameId);
+	else
+		toAdd= Class<AVM1MovieClip>::getInstanceSNoArgs(sys);
+	toAdd->setLegacyMatrix(th->getMatrix());
+	toAdd->name = nameId;
+	toAdd->setMouseEnabled(false);
+	toAdd->tokens.filltokens = th->tokens.filltokens;
+	toAdd->tokens.stroketokens = th->tokens.stroketokens;
+	if (argslen > 2)
+	{
+		ASObject* initobj = asAtomHandler::toObject(args[2],sys);
+		initobj->copyValues(toAdd);
+	}
+	if(th->getParent()->hasLegacyChildAt(Depth))
+	{
+		th->getParent()->deleteLegacyChildAt(Depth);
+		th->getParent()->insertLegacyChildAt(Depth,toAdd);
+	}
+	else
+		th->getParent()->insertLegacyChildAt(Depth,toAdd);
+	toAdd->constructionComplete();
+	toAdd->incRef();
+	ret=asAtomHandler::fromObject(toAdd);
 }
 ASFUNCTIONBODY_ATOM(MovieClip,AVM1Clear)
 {
@@ -2212,7 +2311,7 @@ ASFUNCTIONBODY_ATOM(MovieClip,AVM1AttachBitmap)
 		throw RunTimeException("AVM1: attachBitmap first parameter is no BitmapData");
 	}
 
-	BitmapData* data = asAtomHandler::as<BitmapData>(args[0]);
+	AVM1BitmapData* data = asAtomHandler::as<AVM1BitmapData>(args[0]);
 	data->incRef();
 	Bitmap* toAdd = Class<AVM1Bitmap>::getInstanceS(sys,_MR(data));
 	if (argslen > 2)
@@ -2258,7 +2357,7 @@ ASFUNCTIONBODY_ATOM(MovieClip,AVM1LoadMovie)
 ASFUNCTIONBODY_ATOM(MovieClip,AVM1UnloadMovie)
 {
 	MovieClip* th=asAtomHandler::as<MovieClip>(obj);
-	th->_removeAllChildren();
+	th->setOnStage(false);
 	th->tokens.clear();
 }
 ASFUNCTIONBODY_ATOM(MovieClip,AVM1CreateTextField)
@@ -2300,21 +2399,21 @@ void DisplayObjectContainer::sinit(Class_base* c)
 {
 	CLASS_SETUP(c, InteractiveObject, _constructor, CLASS_SEALED);
 	c->isReusable = true;
-	c->setDeclaredMethodByQName("numChildren","",Class<IFunction>::getFunction(c->getSystemState(),_getNumChildren),GETTER_METHOD,true);
-	c->setDeclaredMethodByQName("getChildIndex","",Class<IFunction>::getFunction(c->getSystemState(),_getChildIndex),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("numChildren","",Class<IFunction>::getFunction(c->getSystemState(),_getNumChildren,0,Class<Integer>::getRef(c->getSystemState()).getPtr()),GETTER_METHOD,true);
+	c->setDeclaredMethodByQName("getChildIndex","",Class<IFunction>::getFunction(c->getSystemState(),_getChildIndex,1,Class<Integer>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("setChildIndex","",Class<IFunction>::getFunction(c->getSystemState(),_setChildIndex),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("getChildAt","",Class<IFunction>::getFunction(c->getSystemState(),getChildAt),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("getChildByName","",Class<IFunction>::getFunction(c->getSystemState(),getChildByName),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("getObjectsUnderPoint","",Class<IFunction>::getFunction(c->getSystemState(),getObjectsUnderPoint),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("addChild","",Class<IFunction>::getFunction(c->getSystemState(),addChild),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("removeChild","",Class<IFunction>::getFunction(c->getSystemState(),removeChild),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("removeChildAt","",Class<IFunction>::getFunction(c->getSystemState(),removeChildAt),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("getChildAt","",Class<IFunction>::getFunction(c->getSystemState(),getChildAt,1,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("getChildByName","",Class<IFunction>::getFunction(c->getSystemState(),getChildByName,1,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("getObjectsUnderPoint","",Class<IFunction>::getFunction(c->getSystemState(),getObjectsUnderPoint,1,Class<Array>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("addChild","",Class<IFunction>::getFunction(c->getSystemState(),addChild,1,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("removeChild","",Class<IFunction>::getFunction(c->getSystemState(),removeChild,1,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("removeChildAt","",Class<IFunction>::getFunction(c->getSystemState(),removeChildAt,1,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("removeChildren","",Class<IFunction>::getFunction(c->getSystemState(),removeChildren),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("addChildAt","",Class<IFunction>::getFunction(c->getSystemState(),addChildAt),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("addChildAt","",Class<IFunction>::getFunction(c->getSystemState(),addChildAt,2,Class<DisplayObject>::getRef(c->getSystemState()).getPtr()),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("swapChildren","",Class<IFunction>::getFunction(c->getSystemState(),swapChildren),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("swapChildrenAt","",Class<IFunction>::getFunction(c->getSystemState(),swapChildrenAt),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("contains","",Class<IFunction>::getFunction(c->getSystemState(),contains),NORMAL_METHOD,true);
-	c->setDeclaredMethodByQName("mouseChildren","",Class<IFunction>::getFunction(c->getSystemState(),_setMouseChildren),SETTER_METHOD,true);
+	c->setDeclaredMethodByQName("mouseChildren","",Class<IFunction>::getFunction(c->getSystemState(),_setMouseChildren,0,Class<Boolean>::getRef(c->getSystemState()).getPtr()),SETTER_METHOD,true);
 	c->setDeclaredMethodByQName("mouseChildren","",Class<IFunction>::getFunction(c->getSystemState(),_getMouseChildren),GETTER_METHOD,true);
 	REGISTER_GETTER_SETTER(c, tabChildren);
 }
@@ -2353,14 +2452,14 @@ void DisplayObjectContainer::setupClipActionsAt(int32_t depth,const CLIPACTIONS&
 		o->as<MovieClip>()->setupActions(actions);
 }
 
-void DisplayObjectContainer::checkRatioForLegacyChildAt(int32_t depth,uint32_t ratio)
+void DisplayObjectContainer::checkRatioForLegacyChildAt(int32_t depth,uint32_t ratio,bool inskipping)
 {
 	if(!hasLegacyChildAt(depth))
 	{
 		LOG(LOG_ERROR,"checkRatioForLegacyChildAt: no child at that depth "<<depth<<" "<<this->toDebugString()<<" "<<this->getTagID());
 		return;
 	}
-	mapDepthToLegacyChild.at(depth)->checkRatio(ratio);
+	mapDepthToLegacyChild.at(depth)->checkRatio(ratio,inskipping);
 	this->hasChanged=true;
 }
 void DisplayObjectContainer::checkColorTransformForLegacyChildAt(int32_t depth,const CXFORMWITHALPHA& colortransform)
@@ -2383,9 +2482,9 @@ void DisplayObjectContainer::deleteLegacyChildAt(int32_t depth)
 	DisplayObject* obj = mapDepthToLegacyChild.at(depth);
 	if(obj->name != BUILTIN_STRINGS::EMPTY)
 	{
-		obj->incRef();
 		// it seems adobe keeps removed objects and reuses them if they are added through placeObjectTags again
-		namedRemovedLegacyChildren[obj->name] = obj;
+		obj->incRef();
+		namedRemovedLegacyChildren[obj->name] = _MR(obj);
 		//The variable is not deleted, but just set to null
 		//This is a tested behavior
 		multiname objName(nullptr);
@@ -2397,10 +2496,10 @@ void DisplayObjectContainer::deleteLegacyChildAt(int32_t depth)
 	}
 
 	obj->incRef();
+	obj->afterLegacyDelete(this);
 	//this also removes it from depthToLegacyChild
 	bool ret = _removeChild(obj);
 	assert_and_throw(ret);
-
 }
 
 void DisplayObjectContainer::insertLegacyChildAt(int32_t depth, DisplayObject* obj)
@@ -2529,10 +2628,18 @@ bool DisplayObjectContainer::destruct()
 	legacyChildrenMarkedForDeletion.clear();
 	mapDepthToLegacyChild.clear();
 	mapLegacyChildToDepth.clear();
-	for (auto it = namedRemovedLegacyChildren.begin(); it != namedRemovedLegacyChildren.end(); it++)
-		(*it).second->decRef();
 	namedRemovedLegacyChildren.clear();
 	return InteractiveObject::destruct();
+}
+
+void DisplayObjectContainer::finalize()
+{
+	dynamicDisplayList.clear();
+	legacyChildrenMarkedForDeletion.clear();
+	mapDepthToLegacyChild.clear();
+	mapLegacyChildToDepth.clear();
+	namedRemovedLegacyChildren.clear();
+	InteractiveObject::finalize();
 }
 
 void DisplayObjectContainer::resetLegacyState()
@@ -2557,7 +2664,7 @@ InteractiveObject::~InteractiveObject()
 ASFUNCTIONBODY_ATOM(InteractiveObject,_constructor)
 {
 	InteractiveObject* th=asAtomHandler::as<InteractiveObject>(obj);
-	EventDispatcher::_constructor(ret,sys,obj,NULL,0);
+	EventDispatcher::_constructor(ret,sys,obj,nullptr,0);
 	//Object registered very early are not supported this way (Stage for example)
 	if(sys->getInputThread())
 		sys->getInputThread()->addListener(th);
@@ -2600,6 +2707,12 @@ bool InteractiveObject::destruct()
 	tabEnabled = false;
 	tabIndex = -1;
 	return DisplayObject::destruct();
+}
+void InteractiveObject::finalize()
+{
+	contextMenu.reset();
+	accessibilityImplementation.reset();
+	DisplayObject::finalize();
 }
 
 void InteractiveObject::buildTraits(ASObject* o)
@@ -2742,7 +2855,7 @@ void DisplayObjectContainer::_addChildAt(_R<DisplayObject> child, unsigned int i
 {
 	//If the child has no parent, set this container to parent
 	//If there is a previous parent, purge the child from his list
-	if(child->getParent())
+	if(child->getParent() && !getSystemState()->isInResetParentList(child.getPtr()))
 	{
 		//Child already in this container
 		if(child->getParent()==this)
@@ -2753,6 +2866,7 @@ void DisplayObjectContainer::_addChildAt(_R<DisplayObject> child, unsigned int i
 			child->getParent()->_removeChild(child.getPtr());
 		}
 	}
+	getSystemState()->removeFromResetParentList(child.getPtr());
 	child->setParent(this);
 	{
 		Locker l(mutexDisplayList);
@@ -2771,7 +2885,7 @@ void DisplayObjectContainer::_addChildAt(_R<DisplayObject> child, unsigned int i
 		child->setOnStage(onStage);
 }
 
-bool DisplayObjectContainer::_removeChild(DisplayObject* child)
+bool DisplayObjectContainer::_removeChild(DisplayObject* child,bool direct)
 {
 	if(!child->getParent() || child->getParent()!=this)
 		return false;
@@ -2782,10 +2896,14 @@ bool DisplayObjectContainer::_removeChild(DisplayObject* child)
 		Locker l(mutexDisplayList);
 		std::vector<_R<DisplayObject>>::iterator it=find(dynamicDisplayList.begin(),dynamicDisplayList.end(),_MR(child));
 		if(it==dynamicDisplayList.end())
-			return false;
+			return getSystemState()->isInResetParentList(child);
 
 		child->setOnStage(false);
-		child->setParent(nullptr);
+		child->incRef();
+		if (direct)
+			child->setParent(nullptr);
+		else
+			getSystemState()->addDisplayObjectToResetParentList(_MR(child));
 		child->setMask(NullRef);
 		
 		//Erase this from the legacy child map (if it is in there)
@@ -2809,7 +2927,7 @@ void DisplayObjectContainer::_removeAllChildren()
 	{
 		_R<DisplayObject> child = *it;
 		child->setOnStage(false);
-		child->setParent(nullptr);
+		getSystemState()->addDisplayObjectToResetParentList(child);
 		child->setMask(NullRef);
 		if (!needsActionScript3())
 			child->removeAVM1Listeners();
@@ -2974,7 +3092,7 @@ ASFUNCTIONBODY_ATOM(DisplayObjectContainer,removeChildAt)
 			th->mapLegacyChildToDepth.erase(it2);
 		}
 		child->setOnStage(false);
-		child->setParent(nullptr);
+		sys->addDisplayObjectToResetParentList(*it);
 		//incRef before the refrence is destroyed
 		child->incRef();
 		th->dynamicDisplayList.erase(it);
@@ -3208,10 +3326,6 @@ _NR<DisplayObject> Shape::hitTestImpl(NullableRef<DisplayObject> last, number_t 
 {
 	number_t xmin, xmax, ymin, ymax;
 	boundsRect(xmin, xmax, ymin, ymax);
-	xmin = (xmin+this->getMatrix().getTranslateX())*this->getMatrix().getScaleX();
-	ymin = (ymin+this->getMatrix().getTranslateY())*this->getMatrix().getScaleY();
-	xmax = (xmax+this->getMatrix().getTranslateX())*this->getMatrix().getScaleX();
-	ymax = (ymax+this->getMatrix().getTranslateY())*this->getMatrix().getScaleY();
 	if (x<xmin || x>xmax || y<ymin || y>ymax)
 		return NullRef;
 	if (!interactiveObjectsOnly)
@@ -3219,12 +3333,12 @@ _NR<DisplayObject> Shape::hitTestImpl(NullableRef<DisplayObject> last, number_t 
 	return TokenContainer::hitTestImpl(interactiveObjectsOnly ? last : _NR<DisplayObject>(this),x-xmin,y-ymin, type);
 }
 
-Shape::Shape(Class_base* c):DisplayObject(c),TokenContainer(this, this->getSystemState()->shapeTokenMemory),graphics(NullRef),fromTag(nullptr)
+Shape::Shape(Class_base* c):DisplayObject(c),TokenContainer(this),graphics(NullRef),fromTag(nullptr)
 {
 }
 
 Shape::Shape(Class_base* c, float scaling, DefineShapeTag* tag):
-	DisplayObject(c),TokenContainer(this, this->getSystemState()->shapeTokenMemory, *tag->tokens, scaling),graphics(NullRef),fromTag(tag)
+	DisplayObject(c),TokenContainer(this, *tag->tokens, scaling),graphics(NullRef),fromTag(tag)
 {
 }
 
@@ -3250,6 +3364,24 @@ bool Shape::destruct()
 	graphics.reset();
 	fromTag=nullptr;
 	return 	DisplayObject::destruct();
+}
+
+void Shape::finalize()
+{
+	graphics.reset();
+	DisplayObject::finalize();
+}
+
+void Shape::startDrawJob()
+{
+	if (graphics)
+		graphics->startDrawJob();
+}
+
+void Shape::endDrawJob()
+{
+	if (graphics)
+		graphics->endDrawJob();
 }
 
 void Shape::sinit(Class_base* c)
@@ -3282,14 +3414,16 @@ ASFUNCTIONBODY_ATOM(Shape,_getGraphics)
 	ret = asAtomHandler::fromObject(th->graphics.getPtr());
 }
 
-MorphShape::MorphShape(Class_base* c):DisplayObject(c),TokenContainer(this, this->getSystemState()->morphShapeTokenMemory),morphshapetag(nullptr)
+MorphShape::MorphShape(Class_base* c):DisplayObject(c),TokenContainer(this),morphshapetag(nullptr)
 {
 	scaling = 1.0f/20.0f;
 }
 
-MorphShape::MorphShape(Class_base *c, DefineMorphShapeTag* _morphshapetag):DisplayObject(c),TokenContainer(this, this->getSystemState()->morphShapeTokenMemory),morphshapetag(_morphshapetag)
+MorphShape::MorphShape(Class_base *c, DefineMorphShapeTag* _morphshapetag):DisplayObject(c),TokenContainer(this),morphshapetag(_morphshapetag)
 {
 	scaling = 1.0f/20.0f;
+	if (this->morphshapetag)
+		this->morphshapetag->getTokensForRatio(tokens,0);
 }
 
 void MorphShape::sinit(Class_base* c)
@@ -3302,13 +3436,21 @@ void MorphShape::buildTraits(ASObject* o)
 	//No traits
 }
 
-void MorphShape::checkRatio(uint32_t ratio)
+void MorphShape::checkRatio(uint32_t ratio, bool inskipping)
 {
-	TokenContainer::FromDefineMorphShapeTagToShapeVector(getSystemState(),this->morphshapetag,tokens,ratio);
+	if (inskipping)
+		return;
+	if (this->morphshapetag)
+		this->morphshapetag->getTokensForRatio(tokens,ratio);
 	this->hasChanged = true;
 	this->setNeedsTextureRecalculation(ratio != 0 && ratio != 65535);
 	if (isOnStage())
 		requestInvalidation(getSystemState());
+}
+
+uint32_t MorphShape::getTagID() const
+{
+	return morphshapetag ? morphshapetag->getId():UINT32_MAX;
 }
 
 
@@ -3667,21 +3809,29 @@ void Stage::executeFrameScript()
 	hiddenobjects.clear();
 }
 
+void Stage::finalize()
+{
+	focus.reset();
+	root.reset();
+	hiddenobjects.clear();
+	avm1KeyboardListeners.clear();
+	avm1MouseListeners.clear();
+	avm1EventListeners.clear();
+	avm1ResizeListeners.clear();
+	DisplayObjectContainer::finalize();
+}
+
 void Stage::AVM1HandleEvent(EventDispatcher* dispatcher, Event* e)
 {
 	if (e->is<KeyboardEvent>())
 	{
 		if (e->type =="keyDown")
 		{
-			getSystemState()->getInputThread()->lastKeymod = SDL_Keymod(e->as<KeyboardEvent>()->getModifiers());
-			getSystemState()->getInputThread()->lastKeyDown = e->as<KeyboardEvent>()->getSDLKeyCode();
-			getSystemState()->getInputThread()->lastKeyUp = 0;
+			getSystemState()->getInputThread()->setLastKeyDown(e->as<KeyboardEvent>());
 		}
 		else if (e->type =="keyUp")
 		{
-			getSystemState()->getInputThread()->lastKeymod = SDL_Keymod(e->as<KeyboardEvent>()->getModifiers());
-			getSystemState()->getInputThread()->lastKeyUp = e->as<KeyboardEvent>()->getSDLKeyCode();
-			getSystemState()->getInputThread()->lastKeyDown = 0;
+			getSystemState()->getInputThread()->setLastKeyUp(e->as<KeyboardEvent>());
 		}
 		avm1listenerMutex.lock();
 		vector<_R<ASObject>> tmplisteners = avm1KeyboardListeners;
@@ -3977,6 +4127,11 @@ void StageQuality::sinit(Class_base* c)
 	c->setVariableAtomByQName("HIGH",nsNameAndKind(),asAtomHandler::fromString(c->getSystemState(),"high"),CONSTANT_TRAIT);
 	c->setVariableAtomByQName("LOW",nsNameAndKind(),asAtomHandler::fromString(c->getSystemState(),"low"),CONSTANT_TRAIT);
 	c->setVariableAtomByQName("MEDIUM",nsNameAndKind(),asAtomHandler::fromString(c->getSystemState(),"medium"),CONSTANT_TRAIT);
+
+	c->setVariableAtomByQName("HIGH_16X16",nsNameAndKind(),asAtomHandler::fromString(c->getSystemState(),"16x16"),CONSTANT_TRAIT);
+	c->setVariableAtomByQName("HIGH_16X16_LINEAR",nsNameAndKind(),asAtomHandler::fromString(c->getSystemState(),"16x16linear"),CONSTANT_TRAIT);
+	c->setVariableAtomByQName("HIGH_8X8",nsNameAndKind(),asAtomHandler::fromString(c->getSystemState(),"8x8"),CONSTANT_TRAIT);
+	c->setVariableAtomByQName("HIGH_8X8_LINEAR",nsNameAndKind(),asAtomHandler::fromString(c->getSystemState(),"8x8linear"),CONSTANT_TRAIT);
 }
 
 void StageDisplayState::sinit(Class_base* c)
@@ -3988,7 +4143,7 @@ void StageDisplayState::sinit(Class_base* c)
 }
 
 Bitmap::Bitmap(Class_base* c, _NR<LoaderInfo> li, std::istream *s, FILE_TYPE type):
-	DisplayObject(c),TokenContainer(this, this->getSystemState()->bitmapTokenMemory),smoothing(false)
+	DisplayObject(c),smoothing(false)
 {
 	subtype=SUBTYPE_BITMAP;
 	if(li)
@@ -4033,7 +4188,7 @@ Bitmap::Bitmap(Class_base* c, _NR<LoaderInfo> li, std::istream *s, FILE_TYPE typ
 	afterConstruction();
 }
 
-Bitmap::Bitmap(Class_base* c, _R<BitmapData> data) : DisplayObject(c),TokenContainer(this, this->getSystemState()->bitmapTokenMemory),smoothing(false)
+Bitmap::Bitmap(Class_base* c, _R<BitmapData> data) : DisplayObject(c),smoothing(false)
 {
 	subtype=SUBTYPE_BITMAP;
 	bitmapData = data;
@@ -4112,31 +4267,29 @@ ASFUNCTIONBODY_GETTER_SETTER_CB(Bitmap,pixelSnapping,onPixelSnappingChanged);
 
 void Bitmap::updatedData()
 {
-	tokens.clear();
-
 	if(bitmapData.isNull() || bitmapData->getBitmapContainer().isNull())
+	{
+		if (cachedSurface.isChunkOwner && cachedSurface.tex)
+			cachedSurface.tex->makeEmpty();
+		else
+			cachedSurface.tex=nullptr;
 		return;
-
-	FILLSTYLE style(0xff);
-	if (smoothing)
-		style.FillStyleType=CLIPPED_BITMAP;
-	else
-		style.FillStyleType=NON_SMOOTHED_CLIPPED_BITMAP;
-	style.bitmap=bitmapData->getBitmapContainer();
-	tokens.filltokens.emplace_back(_MR(new GeomToken(SET_FILL, style)));
-	tokens.filltokens.emplace_back(_MR(new GeomToken(MOVE, Vector2(0, 0))));
-	tokens.filltokens.emplace_back(_MR(new GeomToken(STRAIGHT, Vector2(0, style.bitmap->getHeight()))));
-	tokens.filltokens.emplace_back(_MR(new GeomToken(STRAIGHT, Vector2(style.bitmap->getWidth(), style.bitmap->getHeight()))));
-	tokens.filltokens.emplace_back(_MR(new GeomToken(STRAIGHT, Vector2(style.bitmap->getWidth(), 0))));
-	tokens.filltokens.emplace_back(_MR(new GeomToken(STRAIGHT, Vector2(0, 0))));
+	}
+	cachedSurface.tex = &bitmapData->getBitmapContainer()->bitmaptexture;
+	cachedSurface.isChunkOwner=false;
 	hasChanged=true;
-	setNeedsTextureRecalculation();
 	if(onStage)
 		requestInvalidation(getSystemState());
 }
 bool Bitmap::boundsRect(number_t& xmin, number_t& xmax, number_t& ymin, number_t& ymax) const
 {
-	return TokenContainer::boundsRect(xmin,xmax,ymin,ymax);
+	if (bitmapData.isNull())
+		return false;
+	xmin = 0;
+	ymin = 0;
+	xmax = bitmapData->getWidth();
+	ymax = bitmapData->getHeight();
+	return true;
 }
 
 _NR<DisplayObject> Bitmap::hitTestImpl(_NR<DisplayObject> last, number_t x, number_t y, DisplayObject::HIT_TYPE type,bool interactiveObjectsOnly)
@@ -4164,6 +4317,96 @@ IntSize Bitmap::getBitmapSize() const
 		return IntSize(0, 0);
 	else
 		return IntSize(bitmapData->getWidth(), bitmapData->getHeight());
+}
+
+void Bitmap::requestInvalidation(InvalidateQueue *q, bool forceTextureRefresh)
+{
+	if(skipRender())
+		return;
+	incRef();
+	// texture recalculation is never needed for bitmaps
+	resetNeedsTextureRecalculation();
+	q->addToInvalidateQueue(_MR(this));
+}
+
+IDrawable *Bitmap::invalidate(DisplayObject *target, const MATRIX &initialMatrix, bool smoothing)
+{
+	int32_t x,y,rx,ry;
+	uint32_t width,height;
+	uint32_t rwidth,rheight;
+	number_t bxmin,bxmax,bymin,bymax;
+	if(!boundsRectWithoutChildren(bxmin,bxmax,bymin,bymax))
+	{
+		//No contents, nothing to do
+		return nullptr;
+	}
+	//Compute the matrix and the masks that are relevant
+	MATRIX totalMatrix;
+	std::vector<IDrawable::MaskData> masks;
+
+	float scalex;
+	float scaley;
+	int offx,offy;
+	getSystemState()->stageCoordinateMapping(getSystemState()->getRenderThread()->windowWidth,getSystemState()->getRenderThread()->windowHeight,offx,offy, scalex,scaley);
+
+	bool isMask;
+	bool hasMask;
+	if (target)
+	{
+		computeMasksAndMatrix(target,masks,totalMatrix,false,isMask,hasMask);
+		totalMatrix=initialMatrix.multiplyMatrix(totalMatrix);
+	}
+	computeBoundsForTransformedRect(bxmin,bxmax,bymin,bymax,x,y,width,height,totalMatrix);
+
+	width = bxmax-bxmin;
+	height = bymax-bymin;
+	float rotation = getConcatenatedMatrix().getRotation();
+	float xscale = getConcatenatedMatrix().getScaleX();
+	float yscale = getConcatenatedMatrix().getScaleY();
+	float redMultiplier=1.0;
+	float greenMultiplier=1.0;
+	float blueMultiplier=1.0;
+	float alphaMultiplier=1.0;
+	float redOffset=0.0;
+	float greenOffset=0.0;
+	float blueOffset=0.0;
+	float alphaOffset=0.0;
+	MATRIX totalMatrix2;
+	std::vector<IDrawable::MaskData> masks2;
+	if (target)
+	{
+		computeMasksAndMatrix(target,masks2,totalMatrix2,true,isMask,hasMask);
+		totalMatrix2=initialMatrix.multiplyMatrix(totalMatrix2);
+	}
+	computeBoundsForTransformedRect(bxmin,bxmax,bymin,bymax,rx,ry,rwidth,rheight,totalMatrix2);
+	ColorTransform* ct = colorTransform.getPtr();
+	DisplayObjectContainer* p = getParent();
+	while (!ct && p)
+	{
+		ct = p->colorTransform.getPtr();
+		p = p->getParent();
+	}
+	if(width==0 || height==0)
+		return nullptr;
+	if (ct)
+	{
+		redMultiplier=ct->redMultiplier;
+		greenMultiplier=ct->greenMultiplier;
+		blueMultiplier=ct->blueMultiplier;
+		alphaMultiplier=ct->alphaMultiplier;
+		redOffset=ct->redOffset;
+		greenOffset=ct->greenOffset;
+		blueOffset=ct->blueOffset;
+		alphaOffset=ct->alphaOffset;
+	}
+	return new BitmapRenderer(this->bitmapData->getBitmapContainer()
+				, x*scalex, y*scaley, width*scalex, height*scaley
+				, rx*scalex,ry*scaley,rwidth*scalex,rheight*scaley,rotation
+				, xscale, yscale
+				, isMask, hasMask
+				, getConcatenatedAlpha(), masks
+				, redMultiplier,greenMultiplier,blueMultiplier,alphaMultiplier
+				, redOffset,greenOffset,blueOffset,alphaOffset,this->smoothing);
 }
 
 void SimpleButton::sinit(Class_base* c)
@@ -4445,13 +4688,18 @@ _NR<DisplayObject> SimpleButton::hitTestImpl(_NR<DisplayObject> last, number_t x
 	_NR<DisplayObject> ret = NullRef;
 	if(hitTestState)
 	{
+		if(!hitTestState->getMatrix().isInvertible())
+			return NullRef;
+
+		number_t localX, localY;
+		hitTestState->getMatrix().getInverted().multiply2D(x,y,localX,localY);
 		this->incRef();
-		ret = hitTestState->hitTest(_MR(this), x, y, type,false);
+		ret = hitTestState->hitTest(_MR(this), localX,localY, type,false);
 	}
 	/* mouseDown events, for example, are never dispatched to the hitTestState,
 	 * but directly to this button (and with event.target = this). This has been
 	 * tested with the official flash player. It cannot work otherwise, as
-	 * hitTestState->parent == NULL. (This has also been verified)
+	 * hitTestState->parent == nullptr. (This has also been verified)
 	 */
 	if(ret)
 	{
@@ -4594,7 +4842,7 @@ ASFUNCTIONBODY_ATOM(SimpleButton,_constructor)
 	/* This _must_ not call the DisplayObjectContainer
 	 * see note at the class declaration.
 	 */
-	InteractiveObject::_constructor(ret,sys,obj,NULL,0);
+	InteractiveObject::_constructor(ret,sys,obj,nullptr,0);
 	SimpleButton* th=asAtomHandler::as<SimpleButton>(obj);
 	_NR<DisplayObject> upState;
 	_NR<DisplayObject> overState;
@@ -4616,7 +4864,7 @@ void SimpleButton::reflectState()
 {
 	assert(dynamicDisplayList.empty() || dynamicDisplayList.size() == 1);
 	if(!dynamicDisplayList.empty())
-		_removeChild(dynamicDisplayList.front().getPtr());
+		_removeChild(dynamicDisplayList.front().getPtr(),true);
 
 	if((currentState == UP || currentState == STATE_OUT) && !upState.isNull())
 	{
@@ -4887,24 +5135,25 @@ void DisplayObjectContainer::executeFrameScript()
 		(*it)->executeFrameScript();
 }
 
-multiname *DisplayObjectContainer::setVariableByMultiname(const multiname &name, asAtom &o, ASObject::CONST_ALLOWED_FLAG allowConst, bool *alreadyset)
+multiname *DisplayObjectContainer::setVariableByMultiname(multiname& name, asAtom &o, ASObject::CONST_ALLOWED_FLAG allowConst, bool *alreadyset)
 {
-	if (asAtomHandler::is<DisplayObject>(o))
-	{
-		// it seems that setting a new value for a named existing dynamic child removes the child from the display list
-		variable* v = findVariableByMultiname(name,this->getClass());
-		if (v && v->kind == TRAIT_KIND::DYNAMIC_TRAIT && asAtomHandler::is<DisplayObject>(v->var))
-		{
-			DisplayObject* obj = asAtomHandler::as<DisplayObject>(v->var);
-			if (!obj->legacy)
-			{
-				if (v->var.uintval == o.uintval)
-					return nullptr;
-				obj->incRef();
-				_removeChild(obj);
-			}
-		}
-	}
+// TODO I disable this for now as gamesmenu from homestarrunner doesn't work with it (I don't know which swf file required this...)
+//	if (asAtomHandler::is<DisplayObject>(o))
+//	{
+//		// it seems that setting a new value for a named existing dynamic child removes the child from the display list
+//		variable* v = findVariableByMultiname(name,this->getClass());
+//		if (v && v->kind == TRAIT_KIND::DYNAMIC_TRAIT && asAtomHandler::is<DisplayObject>(v->var))
+//		{
+//			DisplayObject* obj = asAtomHandler::as<DisplayObject>(v->var);
+//			if (!obj->legacy)
+//			{
+//				if (v->var.uintval == o.uintval)
+//					return nullptr;
+//				obj->incRef();
+//				_removeChild(obj);
+//			}
+//		}
+//	}
 	return InteractiveObject::setVariableByMultiname(name,o,allowConst,alreadyset);
 }
 
@@ -4990,6 +5239,8 @@ void MovieClip::declareFrame()
 				++iter;
 			}
 		}
+		if (newFrame)
+			state.frameadvanced=true;
 	}
 	// remove all legacy objects that have not been handled in the PlaceObject/RemoveObject tags
 	LegacyChildEraseDeletionMarked();
@@ -5021,7 +5272,6 @@ void MovieClip::initFrame()
 	{
 		frameScriptToExecute=state.FP;
 	}
-	state.frameadvanced=false;
 	state.creatingframe=false;
 }
 
@@ -5034,18 +5284,17 @@ void MovieClip::executeFrameScript()
 		(*itbind).second->UpdateVariableBinding(v);
 		itbind++;
 	}
+	state.explicit_FP=false;
 	if (!needsActionScript3())
 	{
-		uint32_t currFP = state.FP;
-		if (!state.stop_FP || !state.avm1ScriptExecutedAfterStop)
+		if (!state.avm1ScriptExecuted)
 		{
+			state.avm1ScriptExecuted=true;
 			auto iter=frames.begin();
 			for(uint32_t i=0;i<state.FP;i++)
 				++iter;
 			iter->AVM1executeActions(this);
 		}
-		if (state.stop_FP && currFP == state.FP)
-			state.avm1ScriptExecutedAfterStop=true;
 	}
 
 	if (frameScriptToExecute != UINT32_MAX)
@@ -5060,10 +5309,9 @@ void MovieClip::executeFrameScript()
 		inExecuteFramescript = false;
 	}
 	Sprite::executeFrameScript();
-	state.explicit_FP=false;
 }
 
-void MovieClip::checkRatio(uint32_t ratio)
+void MovieClip::checkRatio(uint32_t ratio, bool inskipping)
 {
 	// according to http://wahlers.com.br/claus/blog/hacking-swf-2-placeobject-and-ratio/
 	// if the ratio value is different from the previous ratio value for this MovieClip, this clip is resetted to frame 0
@@ -5098,7 +5346,14 @@ void MovieClip::advanceFrame()
 	if (state.stop_FP)
 		stopSound();
 	else
-		checkSound();
+		checkSound(state.next_FP);
+	if (state.frameadvanced && state.explicit_FP)
+	{
+		// frame was advanced more than once in one EnterFrame event, so initFrame was not called
+		// set last_FP to the FP set by previous advanceFrame
+		state.last_FP=state.FP;
+	}
+	state.frameadvanced=false;
 	state.creatingframe=true;
 	if (frameScriptToExecute != UINT32_MAX)
 	{
@@ -5136,6 +5391,7 @@ void MovieClip::advanceFrame()
 	if (state.next_FP != state.FP)
 	{
 		state.FP=state.next_FP;
+		state.avm1ScriptExecuted=false;
 	}
 	if(!state.stop_FP && getFramesLoaded()>0)
 	{
@@ -5174,14 +5430,12 @@ void MovieClip::constructionComplete()
 
 void MovieClip::afterConstruction()
 {
-	// execute framescript of frame 0 after construction is completed
+	// set framescript of frame 0 after construction is completed
 	// only if state.FP was not changed during construction
 	if(frameScripts.count(0) && state.FP == 0)
 	{
 		if (frameScripts.count(0))
 			frameScriptToExecute = 0;
-		this->incRef();
-		this->getSystemState()->currentVm->prependEvent(NullRef, _MR(new (this->getSystemState()->unaccountedMemory) ExecuteFrameScriptEvent(_MR(this))));
 	}
 	if (!this->loadedFrom->usesActionScript3 && !this->inAVM1Attachment)
 	{
@@ -5192,6 +5446,7 @@ void MovieClip::afterConstruction()
 			asAtom ret = asAtomHandler::invalidAtom;
 			asAtom obj = asAtomHandler::fromObjectNoPrimitive(this);
 			constr->call(&ret,&obj,nullptr,0);
+			AVM1registerPrototypeListeners();
 		}
 	}
 }
@@ -5206,7 +5461,7 @@ void MovieClip::resetLegacyState()
 	state.explicit_FP=false;
 	state.creatingframe=false;
 	state.frameadvanced=false;
-	state.avm1ScriptExecutedAfterStop=false;
+	state.avm1ScriptExecuted=false;
 }
 
 Frame *MovieClip::getCurrentFrame()

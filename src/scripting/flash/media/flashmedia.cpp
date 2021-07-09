@@ -81,84 +81,117 @@ ASFUNCTIONBODY_GETTER_SETTER(Video, smoothing);
 
 bool Video::destruct()
 {
-	if (embeddedVideoDecoder)
-	{
-		embeddedVideoDecoder->setFlushing();
-		embeddedVideoDecoder->skipAll();
-		embeddedVideoDecoder->markForDestruction();
-		embeddedVideoDecoder=nullptr;
-	}
+	videotag=nullptr;
+	resetDecoder();
 	netStream.reset();
 	return DisplayObject::destruct();
 }
 
+void Video::finalize()
+{
+	resetDecoder();
+	netStream.reset();
+	DisplayObject::finalize();
+}
+
+void Video::resetDecoder()
+{
+	Locker l(mutex);
+	lastuploadedframe=UINT32_MAX;
+	if (embeddedVideoDecoder)
+	{
+		if (embeddedVideoDecoder->isUploading())
+			embeddedVideoDecoder->markForDestruction();
+		else
+			delete embeddedVideoDecoder;
+		embeddedVideoDecoder=nullptr;
+	}
+}
+
 Video::Video(Class_base* c, uint32_t w, uint32_t h, DefineVideoStreamTag *v)
 	: DisplayObject(c),width(w),height(h),videoWidth(0),videoHeight(0),
-	  netStream(NullRef),deblocking(v ? v->VideoFlagsDeblocking:0),smoothing(v ? v->VideoFlagsSmoothing : false),embeddedVideoDecoder(nullptr),videotag(v),embeddedframesbuffered(0)
+	  netStream(NullRef),deblocking(v ? v->VideoFlagsDeblocking:0),smoothing(v ? v->VideoFlagsSmoothing : false),videotag(v),embeddedVideoDecoder(nullptr),lastuploadedframe(UINT32_MAX)
 {
 	subtype=SUBTYPE_VIDEO;
 }
 
-void Video::setVideoFrame(uint32_t FrameNum, uint8_t *framedata, uint32_t numbytes)
+void Video::checkRatio(uint32_t ratio, bool inskipping)
 {
-	if (getSystemState()->isShuttingDown())
-		return;
 	Locker l(mutex);
-	if (videotag == nullptr)
+	if (videotag)
 	{
-		LOG(LOG_ERROR,"setting embedded video frame without DefineVideoStreamTag, ignored");
-		return;
-	}
 #ifdef ENABLE_LIBAVCODEC
-	if (embeddedVideoDecoder==nullptr)
-	{
-		LS_VIDEO_CODEC lscodec;
-		switch (videotag->VideoCodecID)
+		if (embeddedVideoDecoder==nullptr)
 		{
-			case 2:
-				lscodec = LS_VIDEO_CODEC::H263;
-				break;
-			case 3:
-				LOG(LOG_ERROR,"video codec SCREEN not implemented for embedded video");
-				return;
-			case 4:
-				lscodec = LS_VIDEO_CODEC::VP6;
-				break;
-			case 5:
-				lscodec = LS_VIDEO_CODEC::VP6A;
-				break;
-			default:
-				LOG(LOG_ERROR,"invalid video codec id for embedded video:"<<videotag->VideoCodecID);
-				return;
+			LS_VIDEO_CODEC lscodec;
+			bool ok=false;
+			switch (videotag->VideoCodecID)
+			{
+				case 2:
+					lscodec = LS_VIDEO_CODEC::H263;
+					ok=true;
+					break;
+				case 3:
+					LOG(LOG_ERROR,"video codec SCREEN not implemented for embedded video");
+					break;
+				case 4:
+					lscodec = LS_VIDEO_CODEC::VP6;
+					ok=true;
+					break;
+				case 5:
+					lscodec = LS_VIDEO_CODEC::VP6A;
+					ok=true;
+					break;
+				default:
+					LOG(LOG_ERROR,"invalid video codec id for embedded video:"<<int(videotag->VideoCodecID));
+					break;
+			}
+			if (ok)
+				embeddedVideoDecoder = new FFMpegVideoDecoder(lscodec,nullptr,0,videotag->loadedFrom->getFrameRate(),videotag);
+			lastuploadedframe=UINT32_MAX;
 		}
-		embeddedVideoDecoder = new FFMpegVideoDecoder(lscodec,nullptr,0,getSystemState()->mainClip->getFrameRate());
-	}
-	if (embeddedframesbuffered == FFMPEGVIDEODECODERBUFFERSIZE)
-	{
-		embeddedVideoDecoder->discardFrame();
-		embeddedframesbuffered--;
-	}
-	if (embeddedVideoDecoder->decodeData(framedata,numbytes, FrameNum+1))
-		embeddedframesbuffered++;
 #endif
+		if (embeddedVideoDecoder && !embeddedVideoDecoder->isUploading() && ratio > 0 && ratio <= videotag->NumFrames && videotag->frames[ratio-1])
+		{
+			if (lastuploadedframe == UINT32_MAX)
+			{
+				embeddedVideoDecoder->decodeData(videotag->frames[ratio-1]->getData(),videotag->frames[ratio-1]->getNumBytes(),ratio);
+				embeddedVideoDecoder->waitForFencing();
+				lastuploadedframe = ratio;
+				getSystemState()->getRenderThread()->addUploadJob(embeddedVideoDecoder);
+			}
+			if (ratio != lastuploadedframe && !embeddedVideoDecoder->isUploading())
+			{
+				embeddedVideoDecoder->waitForFencing();
+				embeddedVideoDecoder->setVideoFrameToDecode(ratio-1);
+				lastuploadedframe = ratio;
+				getSystemState()->getRenderThread()->addUploadJob(embeddedVideoDecoder);
+			}
+		}
+		if (lastuploadedframe==uint32_t(videotag->NumFrames-1))
+		{
+			resetDecoder();
+		}
+	}
 }
 
-void Video::checkRatio(uint32_t ratio)
+void Video::afterLegacyDelete(DisplayObjectContainer *par)
 {
 	Locker l(mutex);
-	if (embeddedVideoDecoder==nullptr)
-		return;
-	uint32_t skipped = embeddedVideoDecoder->skipUntil(ratio);
-	if (embeddedframesbuffered > skipped)
-		embeddedframesbuffered-=skipped;
-	else
-		embeddedframesbuffered=0;
-	embeddedVideoDecoder->waitForFencing();
-	getSystemState()->getRenderThread()->addUploadJob(embeddedVideoDecoder);
-	this->setNeedsTextureRecalculation(true);
-	this->hasChanged=true;
-	if (videotag->NumFrames == ratio+1)
-		embeddedVideoDecoder->setFlushing();
+	resetDecoder();
+}
+
+void Video::setOnStage(bool staged, bool force)
+{
+	if(staged!=onStage||force)
+	{
+		if (!staged)
+		{
+			Locker l(mutex);
+			resetDecoder();
+		}
+	}
+	DisplayObject::setOnStage(staged,force);
 }
 
 uint32_t Video::getTagID() const
@@ -192,11 +225,11 @@ bool Video::renderImpl(RenderContext& ctxt) const
 		videoHeight=netStream->getVideoHeight();
 		valid=true;
 	}
-	if (embeddedVideoDecoder)
+	if (videotag)
 	{
 		videoWidth=videotag->Width;
 		videoHeight=videotag->Height;
-		valid=true;
+		valid=embeddedVideoDecoder!= nullptr && embeddedVideoDecoder->getTexture().isValid();
 	}
 	if (valid)
 	{
@@ -222,8 +255,8 @@ bool Video::renderImpl(RenderContext& ctxt) const
 			1.0f,1.0f,
 			1.0f,1.0f,1.0f,1.0f,
 			0.0f,0.0f,0.0f,0.0f,
-			false,false);
-		if (!embeddedVideoDecoder)
+			false,false,0.0,RGB(),false);
+		if (!videotag)
 			netStream->unlock();
 		return false;
 	}
@@ -325,14 +358,14 @@ _NR<DisplayObject> Video::hitTestImpl(_NR<DisplayObject> last, number_t x, numbe
 }
 
 Sound::Sound(Class_base* c)
-	:EventDispatcher(c),downloader(NULL),soundData(new MemoryStreamCache(c->getSystemState())),
+	:EventDispatcher(c),downloader(nullptr),soundData(new MemoryStreamCache(c->getSystemState())),rawDataStreamDecoder(nullptr),rawDataStartPosition(0),
 	 container(true),format(CODEC_NONE, 0, 0),bytesLoaded(0),bytesTotal(0),length(-1)
 {
 	subtype=SUBTYPE_SOUND;
 }
 
 Sound::Sound(Class_base* c, _R<StreamCache> data, AudioFormat _format, number_t duration_in_ms)
-	:EventDispatcher(c),downloader(NULL),soundData(data),
+	:EventDispatcher(c),downloader(nullptr),soundData(data),rawDataStreamDecoder(nullptr),rawDataStartPosition(0),
 	 container(false),format(_format),
 	 bytesLoaded(soundData->getReceivedLength()),
 	 bytesTotal(soundData->getReceivedLength()),length(duration_in_ms)
@@ -344,6 +377,9 @@ Sound::~Sound()
 {
 	if(downloader && getSystemState()->downloadManager)
 		getSystemState()->downloadManager->destroy(downloader);
+	if (rawDataStreamDecoder)
+		delete rawDataStreamDecoder;
+	rawDataStreamDecoder=nullptr;
 }
 
 void Sound::sinit(Class_base* c)
@@ -352,6 +388,7 @@ void Sound::sinit(Class_base* c)
 	c->setDeclaredMethodByQName("load","",Class<IFunction>::getFunction(c->getSystemState(),load),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("play","",Class<IFunction>::getFunction(c->getSystemState(),play),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("close","",Class<IFunction>::getFunction(c->getSystemState(),close),NORMAL_METHOD,true);
+	c->setDeclaredMethodByQName("extract","",Class<IFunction>::getFunction(c->getSystemState(),extract),NORMAL_METHOD,true);
 	c->setDeclaredMethodByQName("loadCompressedDataFromByteArray","",Class<IFunction>::getFunction(c->getSystemState(),loadCompressedDataFromByteArray),NORMAL_METHOD,true);
 	REGISTER_GETTER(c,bytesLoaded);
 	REGISTER_GETTER(c,bytesTotal);
@@ -360,7 +397,7 @@ void Sound::sinit(Class_base* c)
 
 ASFUNCTIONBODY_ATOM(Sound,_constructor)
 {
-	EventDispatcher::_constructor(ret,sys,obj, NULL, 0);
+	EventDispatcher::_constructor(ret,sys,obj, nullptr, 0);
 
 	if (argslen>0)
 		Sound::load(ret,sys,obj, args, argslen);
@@ -418,11 +455,14 @@ ASFUNCTIONBODY_ATOM(Sound,play)
 {
 	Sound* th=asAtomHandler::as<Sound>(obj);
 	number_t startTime;
-	ARG_UNPACK_ATOM(startTime, 0);
+	int32_t loops;
+	_NR<SoundTransform> soundtransform;
+	
+	ARG_UNPACK_ATOM(startTime, 0)(loops,0)(soundtransform,NullRef);
 	if (!sys->mainClip->usesActionScript3) // actionscript2 expects the starttime in seconds, actionscript3 in milliseconds
 		startTime *= 1000;
-	if (argslen > 1)
-		LOG(LOG_NOT_IMPLEMENTED,"Sound.play with more than one argument");
+	if (soundtransform.isNull())
+		soundtransform = _MR(Class<SoundTransform>::getInstanceSNoArgs(sys));
 
 	th->incRef();
 	if (th->container)
@@ -432,6 +472,8 @@ ASFUNCTIONBODY_ATOM(Sound,play)
 		getVm(th->getSystemState())->addEvent(_MR(th),_MR(Class<SampleDataEvent>::getInstanceS(th->getSystemState(),data,0)));
 		th->soundChannel = _MR(Class<SoundChannel>::getInstanceS(sys,th->soundData, AudioFormat(LINEAR_PCM_FLOAT_BE,44100,2),false));
 		th->soundChannel->setStartTime(startTime);
+		th->soundChannel->setLoops(loops);
+		th->soundChannel->soundTransform = soundtransform;
 		th->soundChannel->incRef();
 		ret = asAtomHandler::fromObjectNoPrimitive(th->soundChannel.getPtr());
 	}
@@ -439,12 +481,18 @@ ASFUNCTIONBODY_ATOM(Sound,play)
 	{
 		if (th->soundChannel)
 		{
+			th->soundChannel->setLoops(loops);
+			th->soundChannel->soundTransform = soundtransform;
+			th->soundChannel->play(startTime);
+			th->soundChannel->incRef();
 			ret = asAtomHandler::fromObjectNoPrimitive(th->soundChannel.getPtr());
- 			th->soundChannel->play(startTime);
 			return;
 		}
 		SoundChannel* s = Class<SoundChannel>::getInstanceS(sys,th->soundData, th->format);
 		s->setStartTime(startTime);
+		s->setLoops(loops);
+		s->soundTransform = soundtransform;
+		s->play(startTime);
 		ret = asAtomHandler::fromObjectNoPrimitive(s);
 	}
 }
@@ -458,7 +506,74 @@ ASFUNCTIONBODY_ATOM(Sound,close)
 		th->decRef();
 	}
 }
-
+ASFUNCTIONBODY_ATOM(Sound,extract)
+{
+	Sound* th=asAtomHandler::as<Sound>(obj);
+	_NR<ByteArray> target;
+	int32_t length;
+	int32_t startPosition;
+	ARG_UNPACK_ATOM(target)(length)(startPosition,-1);
+	int32_t readcount=0;
+	if (!target.isNull())
+	{
+		std::streambuf *sbuf = th->soundData->createReader();
+		istream s(sbuf);
+		s.exceptions ( istream::failbit | istream::badbit );
+		
+		int32_t readcount=0;
+		try
+		{
+#ifdef ENABLE_LIBAVCODEC
+			if (th->rawDataStreamDecoder && startPosition >= 0)
+			{
+				delete th->rawDataStreamDecoder;
+				th->rawDataStreamDecoder= nullptr;
+			}
+			if (startPosition < 0)
+				startPosition = th->rawDataStartPosition;
+			if (th->rawDataStreamDecoder== nullptr)
+				th->rawDataStreamDecoder=new FFMpegStreamDecoder(nullptr,sys->getEngineData(),s,&th->format,th->soundData->hasTerminated() ? th->soundData->getReceivedLength() : -1);
+			if(!th->rawDataStreamDecoder->isValid())
+			{
+				LOG(LOG_ERROR,"invalid streamDecoder");
+				delete th->rawDataStreamDecoder;
+				th->rawDataStreamDecoder=nullptr;
+			}
+			else
+			{
+				uint8_t* data = new uint8_t[length];
+				while(true)
+				{
+					bool decodingSuccess=th->rawDataStreamDecoder->decodeNextFrame();
+					if(decodingSuccess==false || !th->rawDataStreamDecoder->audioDecoder)
+						break;
+					if(th->rawDataStreamDecoder->audioDecoder)
+					{
+						uint8_t buf[MAX_AUDIO_FRAME_SIZE];
+						uint32_t read = th->rawDataStreamDecoder->audioDecoder->copyFrame((int16_t *)buf, MAX_AUDIO_FRAME_SIZE);
+						th->rawDataStartPosition += min(read,uint32_t(length-readcount));
+						if (th->rawDataStartPosition > startPosition)
+						{
+							memcpy(data+readcount,buf,min(read,uint32_t(length-readcount)));
+							readcount+=read;
+						}
+						if (th->rawDataStartPosition-startPosition >= length)
+							break;
+					}
+				}
+				target->writeBytes(data,min(readcount,length));
+				delete[] data;
+			}
+#endif //ENABLE_LIBAVCODEC
+		}
+		catch(exception& e)
+		{
+			LOG(LOG_ERROR, _("Exception in extracting sound data: ")<<e.what());
+		}
+		delete sbuf;
+	}
+	ret = asAtomHandler::fromInt(readcount);
+}
 
 ASFUNCTIONBODY_ATOM(Sound,loadCompressedDataFromByteArray)
 {
@@ -602,9 +717,9 @@ ASFUNCTIONBODY_ATOM(SoundLoaderContext,_constructor)
 ASFUNCTIONBODY_GETTER_SETTER(SoundLoaderContext,bufferTime);
 ASFUNCTIONBODY_GETTER_SETTER(SoundLoaderContext,checkPolicyFile);
 
-SoundChannel::SoundChannel(Class_base* c, _NR<StreamCache> _stream, AudioFormat _format, bool autoplay)
-	: EventDispatcher(c),stream(_stream),stopped(true),terminated(true),audioDecoder(NULL),audioStream(NULL),
-	format(_format),oldVolume(-1.0),startTime(0),restartafterabort(false),soundTransform(_MR(Class<SoundTransform>::getInstanceS(c->getSystemState()))),
+SoundChannel::SoundChannel(Class_base* c, _NR<StreamCache> _stream, AudioFormat _format, bool autoplay, StartSoundTag* _tag)
+	: EventDispatcher(c),stream(_stream),stopped(true),terminated(true),audioDecoder(nullptr),audioStream(nullptr),
+	format(_format),tag(_tag),oldVolume(-1.0),startTime(0),loopstogo(0),restartafterabort(false),soundTransform(_MR(Class<SoundTransform>::getInstanceS(c->getSystemState()))),
 	leftPeak(1),rightPeak(1)
 {
 	subtype=SUBTYPE_SOUNDCHANNEL;
@@ -697,8 +812,8 @@ void SoundChannel::sinit(Class_base* c)
 	REGISTER_GETTER_SETTER(c,soundTransform);
 }
 
-ASFUNCTIONBODY_GETTER_NOT_IMPLEMENTED(SoundChannel,leftPeak);
-ASFUNCTIONBODY_GETTER_NOT_IMPLEMENTED(SoundChannel,rightPeak);
+ASFUNCTIONBODY_GETTER(SoundChannel,leftPeak);
+ASFUNCTIONBODY_GETTER(SoundChannel,rightPeak);
 ASFUNCTIONBODY_GETTER_SETTER_CB(SoundChannel,soundTransform,validateSoundTransform);
 
 void SoundChannel::buildTraits(ASObject* o)
@@ -723,7 +838,7 @@ void SoundChannel::validateSoundTransform(_NR<SoundTransform> oldValue)
 
 ASFUNCTIONBODY_ATOM(SoundChannel,_constructor)
 {
-	EventDispatcher::_constructor(ret,sys,obj, NULL, 0);
+	EventDispatcher::_constructor(ret,sys,obj, nullptr, 0);
 }
 
 ASFUNCTIONBODY_ATOM(SoundChannel, stop)
@@ -744,7 +859,16 @@ ASFUNCTIONBODY_ATOM(SoundChannel,getPosition)
 }
 void SoundChannel::execute()
 {
-	playStream();
+	while (true)
+	{
+		playStream();
+		if (loopstogo)
+			loopstogo--;
+		else
+			break;
+		if (ACQUIRE_READ(stopped))
+			break;
+	}
 }
 
 void SoundChannel::playStream()
@@ -793,7 +917,7 @@ void SoundChannel::playStream()
 				audioDecoder=streamDecoder->audioDecoder;
 
 			if(audioStream==nullptr && audioDecoder && audioDecoder->isValid())
-				audioStream=getSystemState()->audioManager->createStream(audioDecoder,false,this,startTime);
+				audioStream=getSystemState()->audioManager->createStream(audioDecoder,false,this,startTime,soundTransform ? soundTransform->volume : 1.0);
 
 			if(audioStream)
 			{
@@ -803,6 +927,7 @@ void SoundChannel::playStream()
 					audioStream->setVolume(soundTransform->volume);
 					oldVolume = soundTransform->volume;
 				}
+				checkEnvelope();
 			}
 			
 			if(threadAborting)
@@ -897,6 +1022,24 @@ void SoundChannel::threadAbort()
 		audioDecoder=nullptr;
 	}
 	mutex.unlock();
+}
+void SoundChannel::checkEnvelope()
+{
+	if (tag && tag->getSoundInfo()->HasEnvelope)
+	{
+		uint32_t playedtime = audioStream->getPlayedTime();
+		auto itprev = tag->getSoundInfo()->SoundEnvelope.begin();
+		for (auto it = tag->getSoundInfo()->SoundEnvelope.begin(); it != tag->getSoundInfo()->SoundEnvelope.end(); it++)
+		{
+			if (it->Pos44/44>playedtime)
+				break;
+			itprev=it;
+		}
+		leftPeak= number_t(itprev->LeftLevel)/32768.0;
+		rightPeak= number_t(itprev->LeftLevel)/32768.0;
+		if (audioStream)
+			audioStream->setPanning(itprev->LeftLevel,itprev->RightLevel);
+	}
 }
 
 void StageVideo::sinit(Class_base *c)

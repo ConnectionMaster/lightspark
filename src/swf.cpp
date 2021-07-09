@@ -38,6 +38,7 @@
 #include "backends/extscriptobject.h"
 #include "backends/input.h"
 #include "backends/locale.h"
+#include "backends/currency.h"
 #include "memory_support.h"
 
 #ifdef ENABLE_CURL
@@ -102,6 +103,12 @@ RootMovieClip::~RootMovieClip()
 {
 	for(auto it=dictionary.begin();it!=dictionary.end();++it)
 		delete it->second;
+}
+
+void RootMovieClip::destroyTags()
+{
+	for(auto it=frames.begin();it!=frames.end();++it)
+		it->destroyTags();
 }
 
 void RootMovieClip::parsingFailed()
@@ -201,7 +208,7 @@ static const char* builtinStrings[] = {"any", "void", "prototype", "Function", "
 									   "_target","this","_root","_parent","_global","super",
 									   "onEnterFrame","onMouseMove","onMouseDown","onMouseUp","onPress","onRelease","onReleaseOutside","onMouseWheel","onLoad",
 									   "object","undefined","boolean","number","string","function","onRollOver","onRollOut",
-									   "__proto__"
+									   "__proto__","target","flash.events:IEventDispatcher","addEventListener","removeEventListener","dispatchEvent","hasEventListener"
 									  };
 
 extern uint32_t asClassCount;
@@ -264,12 +271,12 @@ SystemState::SystemState(uint32_t fileSize, FLASH_MODE mode):
 	bitmapTokenMemory = allocateMemoryAccount("Tokens.Bitmap");
 	spriteTokenMemory = allocateMemoryAccount("Tokens.Sprite");
 
-	null=_MR(new (unaccountedMemory) Null);
+	null=new (unaccountedMemory) Null;
 	null->setSystemState(this);
-	null->setConstant();
-	undefined=_MR(new (unaccountedMemory) Undefined);
+	null->setRefConstant();
+	undefined=new (unaccountedMemory) Undefined;
 	undefined->setSystemState(this);
-	undefined->setConstant();
+	undefined->setRefConstant();
 
 	builtinClasses = new Class_base*[asClassCount];
 	memset(builtinClasses,0,asClassCount*sizeof(Class_base*));
@@ -284,35 +291,39 @@ SystemState::SystemState(uint32_t fileSize, FLASH_MODE mode):
 	classObject->decRef();
 	objClassRef = asobjectClass.getPtr();
 
-	trueRef=_MR(Class<Boolean>::getInstanceS(this,true));
-	trueRef->setConstant();
-	falseRef=_MR(Class<Boolean>::getInstanceS(this,false));
-	falseRef->setConstant();
+	trueRef=Class<Boolean>::getInstanceS(this,true);
+	trueRef->setRefConstant();
+	falseRef=Class<Boolean>::getInstanceS(this,false);
+	falseRef->setRefConstant();
 	
 	nanAtom = asAtomHandler::fromNumber(this,Number::NaN,true);
 
-	systemDomain = _MR(Class<ApplicationDomain>::getInstanceS(this));
-	_NR<ApplicationDomain> applicationDomain=_MR(Class<ApplicationDomain>::getInstanceS(this,systemDomain));
+	systemDomain = Class<ApplicationDomain>::getInstanceS(this);
+	systemDomain->setRefConstant();
+	_NR<ApplicationDomain> applicationDomain=_MR(Class<ApplicationDomain>::getInstanceS(this,_MR(systemDomain)));
 	_NR<SecurityDomain> securityDomain = _MR(Class<SecurityDomain>::getInstanceS(this));
 
     static_SoundMixer_soundTransform  = _MR(Class<SoundTransform>::getInstanceS(this));
+	static_SoundMixer_soundTransform->setRefConstant();
 	threadPool=new ThreadPool(this);
 	downloadThreadPool=new ThreadPool(this);
 
 	timerThread=new TimerThread(this);
 	frameTimerThread=new TimerThread(this);
-	audioManager=NULL;
+	audioManager=nullptr;
 	intervalManager=new IntervalManager();
 	securityManager=new SecurityManager();
 	localeManager = new LocaleManager();
+    currencyManager = new CurrencyManager();
 
 	_NR<LoaderInfo> loaderInfo=_MR(Class<LoaderInfo>::getInstanceS(this));
 	loaderInfo->applicationDomain = applicationDomain;
 	loaderInfo->setBytesLoaded(0);
 	loaderInfo->setBytesTotal(0);
 	mainClip=RootMovieClip::getInstance(loaderInfo, applicationDomain, securityDomain);
+	mainClip->setRefConstant();
 	stage=Class<Stage>::getInstanceS(this);
-	mainClip->incRef();
+	stage->setRefConstant();
 	stage->setRoot(_MR(mainClip));
 	//Get starting time
 	startTime=compat_msectiming();
@@ -503,18 +514,20 @@ void SystemState::stopEngines()
 	if(currentVm)
 		currentVm->shutdown();
 	delete downloadManager;
-	downloadManager=NULL;
+	downloadManager=nullptr;
 	delete securityManager;
-	securityManager=NULL;
+	securityManager=nullptr;
 	delete localeManager;
-	localeManager=NULL;
+	localeManager=nullptr;
+    delete currencyManager;
+    currencyManager=NULL;
 	delete threadPool;
-	threadPool=NULL;
+	threadPool=nullptr;
 	delete downloadThreadPool;
-	downloadThreadPool=NULL;
+	downloadThreadPool=nullptr;
 	//Now stop the managers
 	delete audioManager;
-	audioManager=NULL;
+	audioManager=nullptr;
 }
 
 #ifdef PROFILING_SUPPORT
@@ -575,26 +588,29 @@ void SystemState::systemFinalize()
 	invalidateQueueHead.reset();
 	invalidateQueueTail.reset();
 	parameters.reset();
+	static_SoundMixer_soundTransform.reset();
 	frameListeners.clear();
-	systemDomain.reset();
 	for(auto it = sharedobjectmap.begin(); it != sharedobjectmap.end(); it++)
 		it->second->doFlush();
-
-	mainClip->decRef();
-	//Free the stage. This should free all objects on the displaylist
-	stage->decRef();
+	sharedobjectmap.clear();
+	mainClip->destroyTags();
 }
 
 SystemState::~SystemState()
 {
+	// 1) remove all references to variables as they might point to other constant reffed objects
+	for (auto it = constantrefs.begin(); it != constantrefs.end(); it++)
+	{
+		(*it)->destroyContents();
+		(*it)->finalize();
+	}
+	// 2) delete builtin classes
 	delete[] builtinClasses;
-	null.forceDestruct();
-	undefined.forceDestruct();
-	trueRef.forceDestruct();
-	falseRef.forceDestruct();
-	workerDomain.forceDestruct();
-	worker.forceDestruct();
-	delete asAtomHandler::getObject(nanAtom);
+	// 3) delete the constant reffed objects
+	for (auto it = constantrefs.begin(); it != constantrefs.end(); it++)
+	{
+		delete (*it);
+	}
 }
 
 void SystemState::destroy()
@@ -654,7 +670,7 @@ void SystemState::destroy()
 	systemFinalize();
 
 	/*
-	 * 1) call finalize on all objects, this will free all referenced objects and thereby
+	 * 1) call finalize on all objects, this will free all non constant referenced objects and thereby
 	 * cut circular references. After that, all ASObjects but classes and templates should
 	 * have been deleted through decRef. Else it is an error.
 	 * 2) decRef all the classes and templates to which we hold a reference through the
@@ -667,7 +683,7 @@ void SystemState::destroy()
 			builtinClasses[i]->finalize();
 	}
 	for(auto it = customClasses.begin(); it != customClasses.end(); ++it)
-		(*it)->finalize();
+		it->second->finalize();
 	for(auto it = templates.begin(); it != templates.end(); ++it)
 		it->second->finalize();
 
@@ -682,7 +698,7 @@ void SystemState::destroy()
 			builtinClasses[i]->decRef();
 	}
 	for(auto i = customClasses.begin(); i != customClasses.end(); ++i)
-		(*i)->decRef();
+		i->second->decRef();
 
 	//Free templates by decRef'ing them
 	for(auto i = templates.begin(); i != templates.end(); ++i)
@@ -703,12 +719,13 @@ void SystemState::destroy()
 	delete renderThread;
 	renderThread=nullptr;
 	delete inputThread;
-	inputThread=NULL;
+	inputThread=nullptr;
 	delete engineData;
-	engineData=NULL;
+	engineData=nullptr;
 
 	for(auto it=profilingData.begin();it!=profilingData.end();it++)
 		delete *it;
+	uniqueStringMap.clear();
 }
 
 bool SystemState::isOnError() const
@@ -854,7 +871,7 @@ void SystemState::delayedStopping()
 	//This is called from the plugin, also kill the stream
 	engineData->stopMainDownload();
 	stopEngines();
-	setTLSSys(NULL);
+	setTLSSys(nullptr);
 }
 
 void SystemState::createEngines()
@@ -1075,14 +1092,14 @@ void SystemState::needsAVM2(bool avm2)
 		LOG(LOG_INFO,_("Creating VM"));
 		MemoryAccount* vmDataMemory=this->allocateMemoryAccount("VM_Data");
 		currentVm=new ABCVm(this, vmDataMemory);
-		workerDomain = _MR(Class<WorkerDomain>::getInstanceS(this));
-		workerDomain->setConstant();
-		worker = _MR(Class<ASWorker>::getInstanceS(this));
+		workerDomain = Class<WorkerDomain>::getInstanceS(this);
+		workerDomain->setRefConstant();
+		worker = Class<ASWorker>::getInstanceS(this);
 		worker->isPrimordial = true;
 		worker->state ="running";
-		worker->setConstant();
-		addWorker(worker.getPtr());
-		setTLSWorker(worker.getPtr());
+		worker->setRefConstant();
+		addWorker(worker);
+		setTLSWorker(worker);
 	}
 	else
 		vmVersion=AVM1;
@@ -1174,6 +1191,8 @@ void SystemState::addToInvalidateQueue(_R<DisplayObject> d)
 
 void SystemState::flushInvalidationQueue()
 {
+	if (isShuttingDown())
+		return;
 	Locker l(invalidateQueueLock);
 	_NR<DisplayObject> cur=invalidateQueueHead;
 	while(!cur.isNull())
@@ -1220,7 +1239,8 @@ void SystemState::flushInvalidationQueue()
 					renderThread->addRefreshableSurface(d,cur);
 			}
 			cur->hasChanged=false;
-			cur->resetNeedsTextureRecalculation();
+			if (getRenderThread()->isStarted())
+				cur->resetNeedsTextureRecalculation();
 		}
 		_NR<DisplayObject> next=cur->invalidateQueueNext;
 		cur->invalidateQueueNext=NullRef;
@@ -1469,8 +1489,6 @@ void ParseThread::parseSWFHeader(RootMovieClip *root, UI8 ver)
 	LOG(LOG_INFO,_("FrameRate ") << frameRate);
 	root->setFrameRate(frameRate);
 	root->loaderInfo->setFrameRate(frameRate);
-	//TODO: setting render rate should be done when the clip is added to the displaylist
-	getSys()->setRenderRate(frameRate);
 	root->setFrameSize(FrameSize);
 	root->totalFrames_unreliable = FrameCount;
 }
@@ -1757,7 +1775,20 @@ void ParseThread::parseBitmap()
 {
 	_NR<LoaderInfo> li;
 	li=loader->getContentLoaderInfo();
-
+	switch (fileType)
+	{
+		case FILE_TYPE::FT_PNG:
+			li->contentType = "image/png";
+			break;
+		case FILE_TYPE::FT_JPEG:
+			li->contentType = "image/jpeg";
+			break;
+		case FILE_TYPE::FT_GIF:
+			li->contentType = "image/gif";
+			break;
+		default:
+			break;
+	}
 	_NR<Bitmap> tmp;
 	if (loader->needsActionScript3())
 		tmp = _MNR(Class<Bitmap>::getInstanceS(loader->getSystemState(),li, &f, fileType));
@@ -1826,7 +1857,8 @@ void RootMovieClip::setFrameRate(float f)
 	if (frameRate != f)
 	{
 		frameRate=f;
-		getSystemState()->setRenderRate(frameRate);
+		if (this == getSystemState()->mainClip )
+			getSystemState()->setRenderRate(frameRate);
 	}
 }
 
@@ -1837,11 +1869,11 @@ float RootMovieClip::getFrameRate() const
 
 void RootMovieClip::commitFrame(bool another)
 {
-	checkSound();
 	setFramesLoaded(frames.size());
 
 	if(another)
 		frames.push_back(Frame());
+	checkSound(frames.size());
 
 	if(getFramesLoaded()==1 && frameRate!=0)
 	{
@@ -1879,14 +1911,13 @@ void RootMovieClip::constructionComplete()
 	MovieClip::constructionComplete();
 	incRef();
 	getSystemState()->stage->_addChildAt(_MR(this),0);
+	this->setOnStage(true,true);
 	if (!loaderInfo.isNull())
 		loaderInfo->setComplete();
 	getSystemState()->addTick(1000/frameRate,getSystemState());
 }
 void RootMovieClip::afterConstruction()
 {
-	if (this==getSystemState()->mainClip)
-		this->setOnStage(true,true);
 	DisplayObject::afterConstruction();
 	checkFrameScriptToExecute();
 }
@@ -2399,13 +2430,23 @@ bool RootMovieClip::destruct()
 	waitingforparser=false;
 	return MovieClip::destruct();
 }
+void RootMovieClip::finalize()
+{
+	applicationDomain.reset();
+	securityDomain.reset();
+	MovieClip::finalize();
+}
 
 void RootMovieClip::addBinding(const tiny_string& name, DictionaryTag *tag)
 {
 	// This function will be called only be the parsing thread,
 	// and will only access the last frame, so no locking needed.
 	tag->bindingclassname = name;
-	classesToBeBound.push_back(make_pair(name, tag));
+	uint32_t pos = name.rfind(".");
+	if (pos== tiny_string::npos)
+		classesToBeBound[QName(getSystemState()->getUniqueStringId(name),BUILTIN_STRINGS::EMPTY)] =  tag;
+	else
+		classesToBeBound[QName(getSystemState()->getUniqueStringId(name.substr(pos+1,name.numChars()-(pos+1))),getSystemState()->getUniqueStringId(name.substr(0,pos)))] = tag;
 }
 
 void RootMovieClip::bindClass(const QName& classname, Class_inherit* cls)
@@ -2413,23 +2454,11 @@ void RootMovieClip::bindClass(const QName& classname, Class_inherit* cls)
 	if (cls->isBinded() || classesToBeBound.empty())
 		return;
 
-	tiny_string clsname;
-	if (classname.nsStringId != BUILTIN_STRINGS::EMPTY)
-		clsname = getSystemState()->getStringFromUniqueId(classname.nsStringId) + ".";
-	clsname += getSystemState()->getStringFromUniqueId(classname.nameId);
-
-	auto it=classesToBeBound.begin();
-	for(;it!=classesToBeBound.end();++it)
+	auto it=classesToBeBound.find(classname);
+	if(it!=classesToBeBound.end())
 	{
-		if (it->first == clsname)
-		{
-			if(it->second->bindedTo==NULL)
-				it->second->bindedTo=cls;
-			
-			cls->bindToTag(it->second);
-			classesToBeBound.erase(it);
-			break;
-		}
+		cls->bindToTag(it->second);
+		classesToBeBound.erase(it);
 	}
 }
 
@@ -2437,7 +2466,7 @@ void RootMovieClip::checkBinding(DictionaryTag *tag)
 {
 	if (tag->bindingclassname.empty())
 		return;
-	multiname clsname(NULL);
+	multiname clsname(nullptr);
 	clsname.name_type=multiname::NAME_STRING;
 	clsname.isAttribute = false;
 
@@ -2457,7 +2486,7 @@ void RootMovieClip::checkBinding(DictionaryTag *tag)
 	clsname.name_s_id=getSystemState()->getUniqueStringId(nm);
 	clsname.ns.push_back(nsNameAndKind(getSystemState(),ns,NAMESPACE));
 	
-	ASObject* typeObject = NULL;
+	ASObject* typeObject = nullptr;
 	auto i = applicationDomain->classesBeingDefined.cbegin();
 	while (i != applicationDomain->classesBeingDefined.cend())
 	{
@@ -2468,7 +2497,7 @@ void RootMovieClip::checkBinding(DictionaryTag *tag)
 		}
 		i++;
 	}
-	if (typeObject == NULL)
+	if (typeObject == nullptr)
 	{
 		ASObject* target;
 		asAtom o=asAtomHandler::invalidAtom;
@@ -2476,14 +2505,13 @@ void RootMovieClip::checkBinding(DictionaryTag *tag)
 		if (asAtomHandler::isValid(o))
 			typeObject=asAtomHandler::getObject(o);
 	}
-	if (typeObject != NULL)
+	if (typeObject != nullptr)
 	{
 		Class_inherit* cls = typeObject->as<Class_inherit>();
 		if (cls)
 		{
 			ABCVm *vm = getVm(getSystemState());
-			vm->buildClassAndBindTag(tag->bindingclassname.raw_buf(), tag);
-			
+			vm->buildClassAndBindTag(tag->bindingclassname.raw_buf(), tag,cls);
 			tag->bindedTo=cls;
 			tag->bindingclassname = "";
 			cls->bindToTag(tag);

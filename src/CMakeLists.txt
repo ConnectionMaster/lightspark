@@ -35,6 +35,7 @@ SET(LIBSPARK_SOURCES
   backends/audio.cpp
   backends/builtindecoder.cpp
   backends/config.cpp
+  backends/currency.cpp
   backends/decoder.cpp
   backends/extscriptobject.cpp
   backends/geometry.cpp
@@ -59,6 +60,33 @@ SET(LIBSPARK_SOURCES
   parsing/tags_stub.cpp
   parsing/textfile.cpp
   scripting/abc.cpp
+  scripting/abc_avm1.cpp
+  scripting/abc_flashaccessibility.cpp
+  scripting/abc_flashdesktop.cpp
+  scripting/abc_flashconcurrent.cpp
+  scripting/abc_flashcrypto.cpp
+  scripting/abc_flashdisplay.cpp
+  scripting/abc_flashdisplay3d.cpp
+  scripting/abc_flashevents.cpp
+  scripting/abc_flasherrors.cpp
+  scripting/abc_flashexternal.cpp
+  scripting/abc_flashfilesystem.cpp
+  scripting/abc_flashfilters.cpp
+  scripting/abc_flashgeom.cpp
+  scripting/abc_flashglobalization.cpp
+  scripting/abc_flashmedia.cpp
+  scripting/abc_flashnet.cpp
+  scripting/abc_flashprinting.cpp
+  scripting/abc_flashsampler.cpp
+  scripting/abc_flashsecurity.cpp
+  scripting/abc_flashsensors.cpp
+  scripting/abc_flashsystem.cpp
+  scripting/abc_flashtext.cpp
+  scripting/abc_flashui.cpp
+  scripting/abc_flashutils.cpp
+  scripting/abc_flashxml.cpp
+  scripting/abc_avmplus.cpp
+  scripting/abc_toplevel.cpp
   scripting/abc_codesynt.cpp
   scripting/abc_fast_interpreter.cpp
   scripting/abc_interpreter.cpp
@@ -114,7 +142,9 @@ SET(LIBSPARK_SOURCES
   scripting/flash/globalization/lastoperationstatus.cpp
   scripting/flash/globalization/localeid.cpp
   scripting/flash/globalization/currencyformatter.cpp
+  scripting/flash/globalization/currencyparseresult.cpp
   scripting/flash/globalization/numberformatter.cpp
+  scripting/flash/globalization/numberparseresult.cpp
   scripting/flash/globalization/collator.cpp
   scripting/flash/globalization/collatormode.cpp
   scripting/flash/globalization/datetimenamecontext.cpp
@@ -296,6 +326,9 @@ IF(WIN32)
 # and add them back in the correct order
 	SET(LIGHTSPARK_ALL_LIBRARIES ${LIGHTSPARK_ALL_LIBRARIES} usp10 gdi32)
 ENDIF(WIN32)
+IF(${CMAKE_SYSTEM_PROCESSOR} MATCHES "ppc")
+	SET(LIGHTSPARK_ALL_LIBRARIES ${LIGHTSPARK_ALL_LIBRARIES} atomic)
+ENDIF()
 
 TARGET_LINK_LIBRARIES(spark ${LIGHTSPARK_ALL_LIBRARIES})
 SET_TARGET_PROPERTIES(spark PROPERTIES VERSION "${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}")
@@ -307,7 +340,7 @@ ELSE()
 	TARGET_LINK_LIBRARIES(spark ${OPENGL_LIBRARIES} ${GLEW_LIBRARIES})
 ENDIF(ENABLE_GLES2)
 
-PACK_LIBRARY(spark)
+PACK_LIBRARY(spark $<TARGET_FILE:spark>)
 #We have to use LIBRARY on linux and RUNTIME on win32
 INSTALL(TARGETS spark RUNTIME DESTINATION ${PRIVATELIBDIR} LIBRARY DESTINATION ${PRIVATELIBDIR} ARCHIVE DESTINATION ${PRIVATELIBDIR})
 
@@ -323,7 +356,7 @@ IF(COMPILE_LIGHTSPARK)
   TARGET_LINK_LIBRARIES(lightspark ${SDL2_LIBRARIES} ${SDL2MIXER_LIBRARIES})
   ENDIF()
 
-  PACK_EXECUTABLE(lightspark)
+  PACK_EXECUTABLE(lightspark $<TARGET_FILE:lightspark>)
   INSTALL(TARGETS lightspark RUNTIME DESTINATION ${BINDIR})
   IF(UNIX)
     INSTALL(FILES ${PROJECT_SOURCE_DIR}/docs/man/lightspark.1 DESTINATION ${MANUAL_DIRECTORY}/man1/)
@@ -343,7 +376,7 @@ IF(COMPILE_TIGHTSPARK)
   ENDIF()
 
   INSTALL(TARGETS tightspark RUNTIME DESTINATION ${BINDIR})
-  PACK_EXECUTABLE(tightspark)
+  PACK_EXECUTABLE(tightspark $<TARGET_FILE:tightspark>)
 ENDIF(COMPILE_TIGHTSPARK)
 
 # Browser plugins

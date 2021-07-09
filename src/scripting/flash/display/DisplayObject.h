@@ -47,6 +47,7 @@ friend class ParseThread;
 friend class Loader;
 friend class TextField;
 friend class Shape;
+friend class Bitmap;
 friend std::ostream& operator<<(std::ostream& s, const DisplayObject& r);
 public:
 	enum HIT_TYPE { GENERIC_HIT, // point is over the object
@@ -162,7 +163,7 @@ public:
 	 * cacheAsBitmap is true also if any filter is used
 	 */
 	bool computeCacheAsBitmap() const;
-	void computeMasksAndMatrix(DisplayObject* target, std::vector<IDrawable::MaskData>& masks, MATRIX& totalMatrix, bool includeRotation, bool &isMask, bool &hasMask) const;
+	void computeMasksAndMatrix(const DisplayObject *target, std::vector<IDrawable::MaskData>& masks, MATRIX& totalMatrix, bool includeRotation, bool &isMask, bool &hasMask) const;
 	ASPROPERTY_GETTER_SETTER(bool,cacheAsBitmap);
 	DisplayObjectContainer* getParent() const { return parent; }
 	bool findParent(DisplayObject* d) const;
@@ -192,12 +193,13 @@ public:
 	{
 		throw RunTimeException("DisplayObject::getScaleFactor");
 	}
-	multiname* setVariableByMultiname(const multiname& name, asAtom& o, CONST_ALLOWED_FLAG allowConst, bool* alreadyset=nullptr) override;
+	multiname* setVariableByMultiname(multiname& name, asAtom& o, CONST_ALLOWED_FLAG allowConst, bool* alreadyset=nullptr) override;
 	bool deleteVariableByMultiname(const multiname& name) override;
 	virtual void removeAVM1Listeners();
+	void AVM1registerPrototypeListeners();
 
-	// used by MorphShapes
-	virtual void checkRatio(uint32_t ratio) {}
+	// used by MorphShapes and embedded video
+	virtual void checkRatio(uint32_t ratio, bool inskipping) {}
 	void onNewEvent(Event *ev) override;
 	void afterHandleEvent(Event* ev) override;
 	
@@ -208,6 +210,8 @@ public:
 	virtual void afterLegacyDelete(DisplayObjectContainer* parent) {}
 	virtual uint32_t getTagID() const { return 0;}
 	virtual void resetLegacyState() {}
+	virtual void startDrawJob() {}
+	virtual void endDrawJob() {}
 	
 	bool Render(RenderContext& ctxt,bool force=false);
 	bool getBounds(number_t& xmin, number_t& xmax, number_t& ymin, number_t& ymax, const MATRIX& m) const;
@@ -310,7 +314,7 @@ public:
 	ASFUNCTION_ATOM(AVM1_getDepth);
 	static void AVM1SetupMethods(Class_base* c);
 	DisplayObject* AVM1GetClipFromPath(tiny_string& path);
-	void AVM1SetVariable(tiny_string& name, asAtom v);
+	void AVM1SetVariable(tiny_string& name, asAtom v, bool setMember=true);
 	asAtom AVM1GetVariable(const tiny_string &name);
 	void AVM1UpdateVariableBindings(uint32_t nameID, asAtom &value);
 	asAtom getVariableBindingValue(const tiny_string &name) override;

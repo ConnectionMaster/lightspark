@@ -28,6 +28,7 @@
 #include "SDL2/SDL_mixer.h"
 #include "scripting/class.h"
 #include "scripting/flash/net/flashnet.h"
+#include "parsing/tags.h"
 
 #if LIBAVUTIL_VERSION_MAJOR < 51
 #define AVMEDIA_TYPE_VIDEO CODEC_TYPE_VIDEO
@@ -96,6 +97,15 @@ void VideoDecoder::markForDestruction()
 {
 	markedForDeletion=true;
 }
+VideoDecoder::VideoDecoder():frameRate(0),framesdecoded(0),framesdropped(0),frameWidth(0),frameHeight(0),lastframe(UINT32_MAX),currentframe(UINT32_MAX),fenceCount(0),resizeGLBuffers(false),markedForDeletion(false)
+{
+}
+
+VideoDecoder::~VideoDecoder()
+{
+	if (videoTexture.isValid())
+		getSys()->getRenderThread()->releaseTexture(getTexture());
+}
 
 void VideoDecoder::waitForFencing()
 {
@@ -123,8 +133,8 @@ bool FFMpegVideoDecoder::fillDataAndCheckValidity()
 	return true;
 }
 
-FFMpegVideoDecoder::FFMpegVideoDecoder(LS_VIDEO_CODEC codecId, uint8_t* initdata, uint32_t datalen, double frameRateHint):
-	ownedContext(true),curBuffer(0),codecContext(NULL),curBufferOffset(0)
+FFMpegVideoDecoder::FFMpegVideoDecoder(LS_VIDEO_CODEC codecId, uint8_t* initdata, uint32_t datalen, double frameRateHint, DefineVideoStreamTag *tag):
+	ownedContext(true),curBuffer(0),codecContext(nullptr),curBufferOffset(0),currentcachedframe(UINT32_MAX),embeddedvideotag(tag)
 {
 	//The tag is the header, initialize decoding
 	switchCodec(codecId, initdata, datalen, frameRateHint);
@@ -135,13 +145,16 @@ FFMpegVideoDecoder::FFMpegVideoDecoder(LS_VIDEO_CODEC codecId, uint8_t* initdata
 void FFMpegVideoDecoder::switchCodec(LS_VIDEO_CODEC codecId, uint8_t *initdata, uint32_t datalen, double frameRateHint)
 {
 	if (codecContext)
+	{
 		avcodec_close(codecContext);
+		if(ownedContext)
+			av_free(codecContext);
+	}
 #ifdef HAVE_AVCODEC_ALLOC_CONTEXT3
 	codecContext=avcodec_alloc_context3(NULL);
 #else
 	codecContext=avcodec_alloc_context();
 #endif //HAVE_AVCODEC_ALLOC_CONTEXT3
-
 	AVCodec* codec=NULL;
 	videoCodec=codecId;
 	if(codecId==H264)
@@ -204,7 +217,7 @@ void FFMpegVideoDecoder::switchCodec(LS_VIDEO_CODEC codecId, uint8_t *initdata, 
 }
 #if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(57, 40, 101)
 FFMpegVideoDecoder::FFMpegVideoDecoder(AVCodecParameters* codecPar, double frameRateHint):
-	ownedContext(true),curBuffer(0),codecContext(NULL),curBufferOffset(0)
+	ownedContext(true),curBuffer(0),codecContext(NULL),curBufferOffset(0),currentcachedframe(UINT32_MAX),embeddedvideotag(nullptr)
 {
 	status=INIT;
 #ifdef HAVE_AVCODEC_ALLOC_CONTEXT3
@@ -245,7 +258,7 @@ FFMpegVideoDecoder::FFMpegVideoDecoder(AVCodecParameters* codecPar, double frame
 }
 #else
 FFMpegVideoDecoder::FFMpegVideoDecoder(AVCodecContext* _c, double frameRateHint):
-	ownedContext(false),curBuffer(0),codecContext(_c),curBufferOffset(0)
+	ownedContext(false),curBuffer(0),codecContext(_c),curBufferOffset(0),currentcachedframe(UINT32_MAX),embeddedvideotag(nullptr)
 {
 	frameIn=av_frame_alloc();
 	status=INIT;
@@ -280,7 +293,6 @@ FFMpegVideoDecoder::FFMpegVideoDecoder(AVCodecContext* _c, double frameRateHint)
 }
 #endif
 
-
 FFMpegVideoDecoder::~FFMpegVideoDecoder()
 {
 	while(fenceCount);
@@ -297,30 +309,50 @@ void FFMpegVideoDecoder::setSize(uint32_t w, uint32_t h)
 	{
 		//Discard all the frames
 		while(discardFrame());
-
-		//As the size chaged, reset the buffer
+	
+		//As the size changed, reset the buffer
 		uint32_t bufferSize=frameWidth*frameHeight/**4*/;
-		buffers.regen(YUVBufferGenerator(bufferSize));
+		if (embeddedvideotag)
+			embeddedbuffers.regen(YUVBufferGenerator(bufferSize,this->codecContext->pix_fmt==AV_PIX_FMT_YUVA420P));
+		else
+			streamingbuffers.regen(YUVBufferGenerator(bufferSize,this->codecContext->pix_fmt==AV_PIX_FMT_YUVA420P));
 	}
 }
 
 uint32_t FFMpegVideoDecoder::skipUntil(uint32_t time)
 {
 	uint32_t ret=0;
-	while(1)
+	if (embeddedvideotag)
 	{
-		if(buffers.isEmpty())
-			break;
-		if(buffers.front().time>=time)
-			break;
-		discardFrame();
-		ret++;
+		while(1)
+		{
+			if(embeddedbuffers.isEmpty())
+				break;
+			if(embeddedbuffers.front().time>=time)
+				break;
+			discardFrame();
+			ret++;
+		}
+	}
+	else
+	{
+		while(1)
+		{
+			if(streamingbuffers.isEmpty())
+				break;
+			if(streamingbuffers.front().time>=time)
+				break;
+			discardFrame();
+			ret++;
+		}
 	}
 	return ret;
 }
 void FFMpegVideoDecoder::skipAll()
 {
-	while(!buffers.isEmpty())
+	while(!streamingbuffers.isEmpty())
+		discardFrame();
+	while(!embeddedbuffers.isEmpty())
 		discardFrame();
 }
 
@@ -328,27 +360,44 @@ bool FFMpegVideoDecoder::discardFrame()
 {
 	Locker locker(mutex);
 	//We don't want ot block if no frame is available
-	bool ret=buffers.nonBlockingPopFront();
-	if(flushing && buffers.isEmpty()) //End of our work
+	if (embeddedvideotag)
 	{
-		status=FLUSHED;
-		flushed.signal();
+		bool ret=embeddedbuffers.nonBlockingPopFront();
+		if(flushing && embeddedbuffers.isEmpty()) //End of our work
+		{
+			status=FLUSHED;
+			flushed.signal();
+		}
+		framesdropped++;
+	
+		return ret;
 	}
-	framesdropped++;
-
-	return ret;
+	else
+	{
+		bool ret=streamingbuffers.nonBlockingPopFront();
+		if(flushing && streamingbuffers.isEmpty()) //End of our work
+		{
+			status=FLUSHED;
+			flushed.signal();
+		}
+		framesdropped++;
+	
+		return ret;
+	}
 }
 
 bool FFMpegVideoDecoder::decodeData(uint8_t* data, uint32_t datalen, uint32_t time)
 {
+	Locker locker(mutex);
 	if(datalen==0)
 		return false;
 #if defined HAVE_AVCODEC_SEND_PACKET && defined HAVE_AVCODEC_RECEIVE_FRAME
-	AVPacket pkt;
-	av_init_packet(&pkt);
-	pkt.data=data;
-	pkt.size=datalen;
-	int ret = avcodec_send_packet(codecContext, &pkt);
+	AVPacket* pkt = av_packet_alloc();
+	if (!pkt)
+		return 0;
+	pkt->data=data;
+	pkt->size=datalen;
+	int ret = avcodec_send_packet(codecContext, pkt);
 	while (ret == 0)
 	{
 		ret = avcodec_receive_frame(codecContext,frameIn);
@@ -357,6 +406,11 @@ bool FFMpegVideoDecoder::decodeData(uint8_t* data, uint32_t datalen, uint32_t ti
 			if (ret != AVERROR(EAGAIN))
 			{
 				LOG(LOG_INFO,"not decoded:"<<ret);
+#ifdef HAVE_AV_PACKET_UNREF
+				av_packet_unref(pkt);
+#else
+				av_free_packet(pkt);
+#endif
 				return false;
 			}
 		}
@@ -366,10 +420,16 @@ bool FFMpegVideoDecoder::decodeData(uint8_t* data, uint32_t datalen, uint32_t ti
 				status=VALID;
 	
 			assert(frameIn->pts==(int64_t)AV_NOPTS_VALUE || frameIn->pts==0);
-	
-			copyFrameToBuffers(frameIn, time);
+			if (time != UINT32_MAX)
+				copyFrameToBuffers(frameIn, time);
 		}
 	}
+#ifdef HAVE_AV_PACKET_UNREF
+	av_packet_unref(pkt);
+#else
+	av_free_packet(pkt);
+#endif
+	av_packet_free(&pkt);
 #else
 	int frameOk=0;
 #if HAVE_AVCODEC_DECODE_VIDEO2
@@ -395,7 +455,8 @@ bool FFMpegVideoDecoder::decodeData(uint8_t* data, uint32_t datalen, uint32_t ti
 
 		assert(frameIn->pts==(int64_t)AV_NOPTS_VALUE || frameIn->pts==0);
 
-		copyFrameToBuffers(frameIn, time);
+		if (time != UINT32_MAX)
+			copyFrameToBuffers(frameIn, time);
 	}
 #endif
 	return true;
@@ -468,35 +529,77 @@ bool FFMpegVideoDecoder::decodePacket(AVPacket* pkt, uint32_t time)
 
 void FFMpegVideoDecoder::copyFrameToBuffers(const AVFrame* frameIn, uint32_t time)
 {
-	YUVBuffer& curTail=buffers.acquireLast();
+	YUVBuffer* curTail=nullptr;
+	curTail=embeddedvideotag ?  &embeddedbuffers.acquireLast() : &streamingbuffers.acquireLast();
 	//Only one thread may access the tail
 	int offset[3]={0,0,0};
 	for(uint32_t y=0;y<frameHeight;y++)
 	{
-		memcpy(curTail.ch[0]+offset[0],frameIn->data[0]+(y*frameIn->linesize[0]),frameWidth);
+		memcpy(curTail->ch[0]+offset[0],frameIn->data[0]+(y*frameIn->linesize[0]),frameWidth);
+		if (codecContext->pix_fmt==AV_PIX_FMT_YUVA420P)
+			memcpy(curTail->ch[3]+offset[0],frameIn->data[3]+(y*frameIn->linesize[0]),frameWidth);
 		offset[0]+=frameWidth;
 	}
 	for(uint32_t y=0;y<frameHeight/2;y++)
 	{
-		memcpy(curTail.ch[1]+offset[1],frameIn->data[1]+(y*frameIn->linesize[1]),frameWidth/2);
-		memcpy(curTail.ch[2]+offset[2],frameIn->data[2]+(y*frameIn->linesize[2]),frameWidth/2);
+		memcpy(curTail->ch[1]+offset[1],frameIn->data[1]+(y*frameIn->linesize[1]),frameWidth/2);
+		memcpy(curTail->ch[2]+offset[2],frameIn->data[2]+(y*frameIn->linesize[2]),frameWidth/2);
 		offset[1]+=frameWidth/2;
 		offset[2]+=frameWidth/2;
 	}
-	curTail.time=time;
-
-	buffers.commitLast();
+	curTail->time=time;
+	if (embeddedvideotag)
+		embeddedbuffers.commitLast();
+	else
+		streamingbuffers.commitLast();
 }
 
-void FFMpegVideoDecoder::upload(uint8_t* data, uint32_t w, uint32_t h) const
+void FFMpegVideoDecoder::upload(uint8_t* data, uint32_t w, uint32_t h)
 {
-	if(buffers.isEmpty())
-		return;
+	Locker l(mutex);
 	//Verify that the size are right
 	assert_and_throw(w==((frameWidth+15)&0xfffffff0) && h==frameHeight);
+	if (embeddedvideotag) // on embedded video we decode the frames during upload
+	{
+		if (currentframe != UINT32_MAX)
+		{
+			skipAll();
+			for (uint32_t i = lastframe+1; i <currentframe; i++)
+			{
+				VideoFrameTag* t = embeddedvideotag->getFrame(i);
+				if (t)
+					decodeData(t->getData(),t->getNumBytes(),UINT32_MAX);
+			}
+			decodeData(embeddedvideotag->getFrame(currentframe)->getData(),embeddedvideotag->getFrame(currentframe)->getNumBytes(), 0);
+			lastframe=currentframe;
+		}
+		else
+			currentframe=0;
+		if(embeddedbuffers.isEmpty())
+			return;
+
+	}
+	else
+	{
+		if(streamingbuffers.isEmpty())
+			return;
+	}
+	
 	//At least a frame is available
-	const YUVBuffer& cur=buffers.front();
-	fastYUV420ChannelsToYUV0Buffer(cur.ch[0],cur.ch[1],cur.ch[2],data,frameWidth,frameHeight);
+	YUVBuffer* cur=embeddedvideotag ? &embeddedbuffers.front() : &streamingbuffers.front();
+	fastYUV420ChannelsToYUV0Buffer(cur->ch[0],cur->ch[1],cur->ch[2],data,frameWidth,frameHeight);
+	if (codecContext->pix_fmt==AV_PIX_FMT_YUVA420P)
+	{
+		uint32_t texw= (frameWidth+15)&0xfffffff0;
+		for(uint32_t i=0;i<frameHeight;i++)
+		{
+			for(uint32_t j=0;j<frameWidth;j++)
+			{
+				uint32_t pixelCoordFull=i*texw+j;
+				data[pixelCoordFull*4+3]=cur->ch[3][i*frameWidth+j];
+			}
+		}
+	}
 }
 
 void FFMpegVideoDecoder::YUVBufferGenerator::init(YUVBuffer& buf) const
@@ -506,10 +609,14 @@ void FFMpegVideoDecoder::YUVBufferGenerator::init(YUVBuffer& buf) const
 		aligned_free(buf.ch[0]);
 		aligned_free(buf.ch[1]);
 		aligned_free(buf.ch[2]);
+		if (buf.ch[3])
+			aligned_free(buf.ch[3]);
 	}
 	aligned_malloc((void**)&buf.ch[0], 16, bufferSize);
 	aligned_malloc((void**)&buf.ch[1], 16, bufferSize/4);
 	aligned_malloc((void**)&buf.ch[2], 16, bufferSize/4);
+	if (hasAlpha)
+		aligned_malloc((void**)&buf.ch[3], 16, bufferSize);
 }
 #endif //ENABLE_LIBAVCODEC
 
@@ -817,28 +924,29 @@ bool FFMpegAudioDecoder::fillDataAndCheckValidity()
 uint32_t FFMpegAudioDecoder::decodeData(uint8_t* data, int32_t datalen, uint32_t time)
 {
 #if defined HAVE_AVCODEC_SEND_PACKET && defined HAVE_AVCODEC_RECEIVE_FRAME
-	AVPacket pkt;
-	av_init_packet(&pkt);
+	AVPacket* pkt = av_packet_alloc();
+	if (!pkt)
+		return 0;
 
 	// If some data was left unprocessed on previous call,
 	// concatenate.
 	std::vector<uint8_t> combinedBuffer;
 	if (overflowBuffer.empty())
 	{
-		pkt.data=data;
-		pkt.size=datalen;
+		pkt->data=data;
+		pkt->size=datalen;
 	}
 	else
 	{
 		combinedBuffer.assign(overflowBuffer.begin(), overflowBuffer.end());
 		if (datalen > 0)
 			combinedBuffer.insert(combinedBuffer.end(), data, data+datalen);
-		pkt.data = &combinedBuffer[0];
-		pkt.size = combinedBuffer.size();
+		pkt->data = &combinedBuffer[0];
+		pkt->size = combinedBuffer.size();
 		overflowBuffer.clear();
 	}
 	av_frame_unref(frameIn);
-	int ret = avcodec_send_packet(codecContext, &pkt);
+	int ret = avcodec_send_packet(codecContext, pkt);
 	int maxLen = 0;
 	while (ret == 0)
 	{
@@ -855,9 +963,9 @@ uint32_t FFMpegAudioDecoder::decodeData(uint8_t* data, int32_t datalen, uint32_t
 			FrameSamples& curTail=samplesBuffer.acquireLast();
 			int len = resampleFrameToS16(curTail);
 #if ( LIBAVUTIL_VERSION_INT < AV_VERSION_INT(56,0,100) )
-			maxLen = pkt.size - av_frame_get_pkt_size (frameIn);
+			maxLen = pkt->size - av_frame_get_pkt_size (frameIn);
 #else
-			maxLen = pkt.size - frameIn->pkt_size;
+			maxLen = pkt->size - frameIn->pkt_size;
 #endif
 			curTail.len=len;
 			assert(!(curTail.len&0x80000000));
@@ -871,8 +979,8 @@ uint32_t FFMpegAudioDecoder::decodeData(uint8_t* data, int32_t datalen, uint32_t
 	}
 	if (maxLen > 0)
 	{
-		int tmpsize = pkt.size - maxLen;
-		uint8_t* tmpdata = pkt.data;
+		int tmpsize = pkt->size - maxLen;
+		uint8_t* tmpdata = pkt->data;
 		tmpdata += maxLen;
 
 		if (tmpsize > 0)
@@ -880,6 +988,12 @@ uint32_t FFMpegAudioDecoder::decodeData(uint8_t* data, int32_t datalen, uint32_t
 			overflowBuffer.assign(tmpdata , tmpdata+tmpsize);
 		}
 	}
+#ifdef HAVE_AV_PACKET_UNREF
+	av_packet_unref(pkt);
+#else
+	av_free_packet(pkt);
+#endif
+	av_packet_free(&pkt);
 	return maxLen;
 #else
 	FrameSamples& curTail=samplesBuffer.acquireLast();
@@ -1076,9 +1190,9 @@ int FFMpegAudioDecoder::resampleFrameToS16(FrameSamples& curTail)
 			memcpy(curTail.samples, output, maxLen);
 		else
 		{
-				LOG(LOG_ERROR, "resampling failed");
-				memset(curTail.samples, 0, frameIn->linesize[0]);
-				maxLen = frameIn->linesize[0];
+			LOG(LOG_ERROR, "resampling failed");
+			memset(curTail.samples, 0, frameIn->linesize[0]);
+			maxLen = frameIn->linesize[0];
 		}
 		av_freep(&output);
 	}

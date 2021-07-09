@@ -1482,7 +1482,7 @@ std::istream& lightspark::operator>>(std::istream& s, CLIPACTIONRECORD& v)
 	}
 	if (v.datatag)
 	{
-		v.startactionpos=v.datatag->numbytes;//+datatagskipbytes;
+		v.startactionpos=v.datatag->numbytes+v.dataskipbytes;
 		v.actions.resize(len+v.startactionpos);
 		memcpy(v.actions.data(),v.datatag->bytes,v.datatag->numbytes);
 	}
@@ -1499,11 +1499,12 @@ bool CLIPACTIONRECORD::isLast()
 
 std::istream& lightspark::operator>>(std::istream& s, CLIPACTIONS& v)
 {
+	uint32_t startpos=s.tellg();
 	UI16_SWF Reserved;
 	s >> Reserved >> v.AllEventFlags;
 	while(1)
 	{
-		CLIPACTIONRECORD t(v.AllEventFlags.getSWFVersion(),v.datatag);
+		CLIPACTIONRECORD t(v.AllEventFlags.getSWFVersion(),v.dataskipbytes+(uint32_t(s.tellg())-startpos),v.datatag);
 		// use datatag only on first clipaction
 		v.datatag=nullptr;
 		s >> t;
@@ -1568,7 +1569,7 @@ ASObject* lightspark::abstract_d_constant(SystemState* sys,number_t i)
 	Number* ret=new (sys->unaccountedMemory) Number(Class<Number>::getRef(sys).getPtr());
 	ret->dval = i;
 	ret->isfloat = true;
-	ret->setConstant();
+	ret->setRefConstant();
 	return ret;
 }
 ASObject* lightspark::abstract_di(SystemState* sys,int64_t i)
@@ -1640,7 +1641,7 @@ void lightspark::stringToQName(const tiny_string& tmp, tiny_string& name, tiny_s
 	ns="";
 }
 
-RunState::RunState():last_FP(-1),FP(0),next_FP(0),stop_FP(false),explicit_FP(false),creatingframe(false),frameadvanced(false),avm1ScriptExecutedAfterStop(false)
+RunState::RunState():last_FP(-1),FP(0),next_FP(0),stop_FP(false),explicit_FP(false),creatingframe(false),frameadvanced(false),avm1ScriptExecuted(false)
 {
 }
 
@@ -1665,7 +1666,7 @@ tiny_string QName::getQualifiedName(SystemState *sys,bool forDescribeType) const
 
 QName::operator multiname() const
 {
-	multiname ret(NULL);
+	multiname ret(nullptr);
 	ret.name_type = multiname::NAME_STRING;
 	ret.name_s_id = nameId;
 	ret.ns.emplace_back(getSys(),nsStringId, NAMESPACE);
@@ -1819,9 +1820,6 @@ std::istream& lightspark::operator>>(std::istream& stream, SOUNDINFO& v)
 	if (v.HasEnvelope)
 	{
 		stream >> v.EnvPoints;
-		if (v.EnvPoints)
-			LOG(LOG_NOT_IMPLEMENTED,"SOUNDENVELOPE settings are read but not used");
-			
 		for (unsigned int i = 0; i < v.EnvPoints;i++)
 		{
 			SOUNDENVELOPE env;
@@ -1850,4 +1848,12 @@ std::istream& lightspark::operator>>(std::istream& stream, BUTTONCONDACTION& v)
 	v.CondOverDownToIdle = UB(1,bs);
 
 	return stream;
+}
+
+SHAPE::~SHAPE()
+{
+	for (auto it = scaledtexturecache.begin(); it != scaledtexturecache.begin(); it++)
+	{
+		delete (*it).second;
+	}
 }

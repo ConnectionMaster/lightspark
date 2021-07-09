@@ -63,7 +63,7 @@ public:
 						 float _redOffset,float _greenOffset,float _blueOffset,float _alphaOffset,
 						 bool smoothing);
 	
-	uint8_t* getPixelBuffer(float scalex,float scaley) override;
+	uint8_t* getPixelBuffer(float scalex,float scaley, bool* isBufferOwner=nullptr) override;
 	void applyCairoMask(cairo_t* cr, int32_t offsetX, int32_t offsetY, float scalex, float scaley) const override {}
 };
 
@@ -292,6 +292,7 @@ public:
 	virtual int audio_StreamInit(AudioStream* s);
 	virtual void audio_StreamPause(int channel, bool dopause);
 	virtual void audio_StreamSetVolume(int channel, double volume);
+	virtual void audio_StreamSetPanning(int channel, uint16_t left, uint16_t right);
 	virtual void audio_StreamDeinit(int channel);
 	virtual bool audio_ManagerInit();
 	virtual void audio_ManagerCloseMixer();

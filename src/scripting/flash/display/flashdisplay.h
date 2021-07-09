@@ -87,6 +87,7 @@ public:
 	ASFUNCTION_ATOM(_setDoubleClickEnabled);
 	ASFUNCTION_ATOM(_getDoubleClickEnabled);
 	bool destruct() override;
+	void finalize() override;
 	static void sinit(Class_base* c);
 	static void buildTraits(ASObject* o);
 	virtual void lostFocus() {}
@@ -104,7 +105,7 @@ private:
 	bool mouseChildren;
 	map<int32_t,DisplayObject*> mapDepthToLegacyChild;
 	unordered_map<DisplayObject*,int32_t> mapLegacyChildToDepth;
-	map<int32_t,DisplayObject*> namedRemovedLegacyChildren;
+	map<int32_t,_NR<DisplayObject>> namedRemovedLegacyChildren;
 	set<int32_t> legacyChildrenMarkedForDeletion;
 	bool _contains(_R<DisplayObject> child);
 	void getObjectsFromPoint(Point* point, Array* ar);
@@ -132,18 +133,19 @@ public:
 	void requestInvalidation(InvalidateQueue* q, bool forceTextureRefresh=false) override;
 	void _addChildAt(_R<DisplayObject> child, unsigned int index);
 	void dumpDisplayList(unsigned int level=0);
-	bool _removeChild(DisplayObject* child);
+	bool _removeChild(DisplayObject* child, bool direct=false);
 	void _removeAllChildren();
 	void removeAVM1Listeners() override;
 	int getChildIndex(_R<DisplayObject> child);
 	DisplayObjectContainer(Class_base* c);
 	bool destruct() override;
+	void finalize() override;
 	void resetLegacyState() override;
 	bool hasLegacyChildAt(int32_t depth);
 	// this does not test if a DisplayObject exists at the provided depth
 	DisplayObject* getLegacyChildAt(int32_t depth);
 	void setupClipActionsAt(int32_t depth, const CLIPACTIONS& actions);
-	void checkRatioForLegacyChildAt(int32_t depth, uint32_t ratio);
+	void checkRatioForLegacyChildAt(int32_t depth, uint32_t ratio, bool inskipping);
 	void checkColorTransformForLegacyChildAt(int32_t depth, const CXFORMWITHALPHA& colortransform);
 	void deleteLegacyChildAt(int32_t depth);
 	void insertLegacyChildAt(int32_t depth, DisplayObject* obj);
@@ -157,7 +159,7 @@ public:
 	void declareFrame() override;
 	void initFrame() override;
 	void executeFrameScript() override;
-	multiname* setVariableByMultiname(const multiname& name, asAtom& o, CONST_ALLOWED_FLAG allowConst, bool* alreadyset=nullptr) override;
+	multiname* setVariableByMultiname(multiname& name, asAtom& o, CONST_ALLOWED_FLAG allowConst, bool* alreadyset=nullptr) override;
 	bool deleteVariableByMultiname(const multiname& name) override;
 	
 	static void sinit(Class_base* c);
@@ -257,6 +259,10 @@ public:
 	void setupShape(lightspark::DefineShapeTag *tag, float _scaling);
 	uint32_t getTagID() const override;
 	bool destruct() override;
+	void finalize() override;
+	void startDrawJob() override;
+	void endDrawJob() override;
+
 	static void sinit(Class_base* c);
 	static void buildTraits(ASObject* o);
 	ASFUNCTION_ATOM(_constructor);
@@ -289,7 +295,8 @@ public:
 	void requestInvalidation(InvalidateQueue* q, bool forceTextureRefresh=false) override { TokenContainer::requestInvalidation(q,forceTextureRefresh); }
 	IDrawable* invalidate(DisplayObject* target, const MATRIX& initialMatrix,bool smoothing) override
 	{ return TokenContainer::invalidate(target, initialMatrix,smoothing); }
-	void checkRatio(uint32_t ratio) override;
+	void checkRatio(uint32_t ratio, bool inskipping) override;
+	uint32_t getTagID() const override;
 };
 
 class Loader;
@@ -438,6 +445,7 @@ private:
 	//Sprite as its hitArea. Hits will be relayed to hitTarget.
 	_NR<Sprite> hitTarget;
 	_NR<SoundChannel> sound;
+	uint32_t soundstartframe;
 	bool streamingsound;
 protected:
 	bool boundsRect(number_t& xmin, number_t& xmax, number_t& ymin, number_t& ymax) const override;
@@ -448,15 +456,19 @@ protected:
 	bool renderImpl(RenderContext& ctxt) const override;
 	_NR<DisplayObject> hitTestImpl(_NR<DisplayObject> last, number_t x, number_t y, DisplayObject::HIT_TYPE type,bool interactiveObjectsOnly) override;
 	void resetToStart() override;
-	void checkSound();// start sound streaming if it is not already playing
+	void checkSound(uint32_t frame);// start sound streaming if it is not already playing
 	void stopSound();
 	void markSoundFinished();
 public:
 	bool dragged;
 	Sprite(Class_base* c);
 	void setSound(SoundChannel* s, bool forstreaming);
-	void appendSound(unsigned char* buf, int len);
+	void appendSound(unsigned char* buf, int len, uint32_t frame);
+	void setSoundStartFrame(uint32_t frame) { soundstartframe=frame; }
 	bool destruct() override;
+	void finalize() override;
+	void startDrawJob() override;
+	void endDrawJob() override;
 	static void sinit(Class_base* c);
 	static void buildTraits(ASObject* o);
 	ASFUNCTION_ATOM(_constructor);
@@ -601,6 +613,7 @@ public:
 	MovieClip(Class_base* c);
 	MovieClip(Class_base* c, const FrameContainer& f, uint32_t defineSpriteTagID);
 	bool destruct() override;
+	void finalize() override;
 	void gotoAnd(asAtom *args, const unsigned int argslen, bool stop);
 	static void sinit(Class_base* c);
 	static void buildTraits(ASObject* o);
@@ -632,7 +645,7 @@ public:
 	void declareFrame() override;
 	void initFrame() override;
 	void executeFrameScript() override;
-	void checkRatio(uint32_t ratio) override;
+	void checkRatio(uint32_t ratio, bool inskipping) override;
 
 	void afterLegacyInsert() override;
 	void afterLegacyDelete(DisplayObjectContainer* par) override;
@@ -645,7 +658,7 @@ public:
 	bool AVM1HandleMouseEvent(EventDispatcher* dispatcher, MouseEvent *e) override;
 	void AVM1HandleEvent(EventDispatcher* dispatcher, Event* e) override;
 	
-	void AVM1gotoFrameLabel(const tiny_string &label);
+	void AVM1gotoFrameLabel(const tiny_string &label, bool stop, bool switchplaystate);
 	void AVM1gotoFrame(int frame, bool stop, bool switchplaystate=false);
 	static void AVM1SetupMethods(Class_base* c);
 	void AVM1ExecuteFrameActionsFromLabel(const tiny_string &label);
@@ -653,6 +666,7 @@ public:
 	ASFUNCTION_ATOM(AVM1AttachMovie);
 	ASFUNCTION_ATOM(AVM1CreateEmptyMovieClip);
 	ASFUNCTION_ATOM(AVM1RemoveMovieClip);
+	ASFUNCTION_ATOM(AVM1DuplicateMovieClip);
 	ASFUNCTION_ATOM(AVM1Clear);
 	ASFUNCTION_ATOM(AVM1MoveTo);
 	ASFUNCTION_ATOM(AVM1LineTo);
@@ -710,6 +724,7 @@ public:
 	void addHiddenObject(_R<DisplayObject> o) { hiddenobjects.push_back(o);}
 	void initFrame() override;
 	void executeFrameScript() override;
+	void finalize() override;
 	ASFUNCTION_ATOM(_constructor);
 	ASFUNCTION_ATOM(_getAllowFullScreen);
 	ASFUNCTION_ATOM(_getAllowFullScreenInteractive);
@@ -884,7 +899,7 @@ public:
 	static void sinit(Class_base* c);
 };
 
-class Bitmap: public DisplayObject, public TokenContainer
+class Bitmap: public DisplayObject
 {
 friend class CairoTokenRenderer;
 private:
@@ -893,7 +908,7 @@ private:
 	void onPixelSnappingChanged(tiny_string snapping);
 protected:
 	bool renderImpl(RenderContext& ctxt) const override
-		{ return TokenContainer::renderImpl(ctxt); }
+		{ return defaultRender(ctxt); }
 public:
 	ASPROPERTY_GETTER_SETTER(_NR<BitmapData>,bitmapData);
 	ASPROPERTY_GETTER_SETTER(bool, smoothing);
@@ -909,9 +924,8 @@ public:
 	bool boundsRect(number_t& xmin, number_t& xmax, number_t& ymin, number_t& ymax) const override;
 	_NR<DisplayObject> hitTestImpl(_NR<DisplayObject> last, number_t x, number_t y, DisplayObject::HIT_TYPE type,bool interactiveObjectsOnly) override;
 	virtual IntSize getBitmapSize() const;
-	void requestInvalidation(InvalidateQueue* q, bool forceTextureRefresh=false) override { TokenContainer::requestInvalidation(q,forceTextureRefresh); }
-	IDrawable* invalidate(DisplayObject* target, const MATRIX& initialMatrix,bool smoothing) override
-	{ return TokenContainer::invalidate(target, initialMatrix,smoothing); }
+	void requestInvalidation(InvalidateQueue* q, bool forceTextureRefresh=false) override;
+	IDrawable* invalidate(DisplayObject* target, const MATRIX& initialMatrix,bool smoothing) override;
 };
 
 class AVM1Movie: public DisplayObject

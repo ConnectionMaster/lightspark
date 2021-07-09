@@ -109,7 +109,7 @@ struct namespace_info
 	u30 name;
 	bool cachefilled;
 	nsNameAndKind nscached;
-	namespace_info():cachefilled(false) {}
+	namespace_info():cachefilled(false) { kind=0; }
 	~namespace_info(){ cachefilled=false; }
 	const nsNameAndKind& getNS(ABCContext * c, uint32_t nsContextIndex)
 	{
@@ -313,7 +313,8 @@ struct localconstantslot
 
 struct method_body_info
 {
-	method_body_info():localresultcount(0),hit_count(0),codeStatus(ORIGINAL){}
+	method_body_info():localresultcount(0),hit_count(0),codeStatus(ORIGINAL),localsinitialvalues(nullptr){}
+	~method_body_info();
 	u30 method;
 	u30 max_stack;
 	u30 local_count;
@@ -328,11 +329,12 @@ struct method_body_info
 	uint16_t hit_count;
 	uint16_t returnvaluepos;
 	//The code status
-	enum CODE_STATUS { ORIGINAL = 0, USED, OPTIMIZED, JITTED, PRELOADED };
+	enum CODE_STATUS { ORIGINAL = 0, USED, OPTIMIZED, JITTED, PRELOADING, PRELOADED };
 	CODE_STATUS codeStatus;
 	// list of local/slot pairs that were optimized away
 	std::vector<localconstantslot> localconstantslots;
 	std::vector<preloadedcodedata> preloadedcode;
+	asAtom* localsinitialvalues;
 	inline uint16_t getReturnValuePos() const { return returnvaluepos; }
 };
 
